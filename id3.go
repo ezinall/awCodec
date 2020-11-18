@@ -13,10 +13,18 @@ import (
 )
 
 const (
-	encodingISO8859      byte = 0x0
+	// ISO-8859-1. Terminated with $00.
+	encodingISO8859 byte = 0x0
+
+	// UTF-16 encoded Unicode with BOM. All strings in the same frame SHALL have the same byte order.
+	//Terminated with $00 00.
 	encodingUTF16WithBOM byte = 0x1
-	encodingUTF16        byte = 0x2
-	encodingUTF8         byte = 0x3
+
+	// UTF-16BE encoded Unicode without BOM. Terminated with $00 00.
+	encodingUTF16 byte = 0x2
+
+	// UTF-8 encoded Unicode. Terminated with $00.
+	encodingUTF8 byte = 0x3
 )
 
 type ID3Header struct {
@@ -30,6 +38,60 @@ type ID3Frame struct {
 	FrameID [4]byte
 	Size    uint32
 	Flags   uint16
+}
+
+func decodeBuffer(tag *bytes.Buffer, n int64) string {
+	enc, _ := tag.ReadByte() // text encoding
+
+	var reader io.Reader
+	switch enc {
+	case encodingISO8859:
+		reader = charmap.ISO8859_1.NewDecoder().Reader(io.LimitReader(tag, n-1))
+
+	case encodingUTF16WithBOM:
+		encoder := unicode.UTF16(unicode.BigEndian, unicode.UseBOM)
+		reader = transform.NewReader(io.LimitReader(tag, n-1), encoder.NewDecoder())
+
+	case encodingUTF16:
+		encoder := unicode.UTF16(unicode.BigEndian, unicode.IgnoreBOM)
+		reader = transform.NewReader(io.LimitReader(tag, n-1), encoder.NewDecoder())
+
+	case encodingUTF8:
+		// Do nothing.
+
+	default:
+		reader = charmap.ISO8859_1.NewDecoder().Reader(io.LimitReader(tag, n-1))
+	}
+
+	t, _ := ioutil.ReadAll(reader)
+
+	return string(t)
+}
+
+// Decode tag bytes to UTF-8.
+func decodeByte(enc byte, b []byte) string {
+	var r []byte
+
+	switch enc {
+	case encodingISO8859:
+		r, _ = charmap.ISO8859_1.NewDecoder().Bytes(b)
+
+	case encodingUTF16WithBOM:
+		encoder := unicode.UTF16(unicode.BigEndian, unicode.UseBOM)
+		r, _, _ = transform.Bytes(encoder.NewDecoder(), b)
+
+	case encodingUTF16:
+		encoder := unicode.UTF16(unicode.BigEndian, unicode.IgnoreBOM)
+		r, _, _ = transform.Bytes(encoder.NewDecoder(), b)
+
+	case encodingUTF8:
+		// Do nothing.
+
+	default:
+		r, _ = charmap.ISO8859_1.NewDecoder().Bytes(b)
+	}
+
+	return string(r)
 }
 
 // ReadID3 ...
@@ -67,8 +129,20 @@ func ReadID3(buffer *bytes.Reader) {
 			id3Tag.Read(frameData)
 
 		case frameId == "COMM":
-			frameData := make([]byte, frame.Size)
-			id3Tag.Read(frameData)
+			enc, _ := id3Tag.ReadByte() // text encoding
+
+			buf := make([]byte, 3)
+			id3Tag.Read(buf)
+			lang := decodeByte(enc, buf)
+
+			buf, _ = id3Tag.ReadBytes(0x00)
+			desc := decodeByte(enc, buf)
+
+			buf = make([]byte, int(frame.Size)-4+len(desc))
+			id3Tag.Read(buf)
+			val := decodeByte(enc, buf)
+
+			fmt.Printf("%s %s %s\n", lang, desc, val)
 
 		case frameId[0] == 'T':
 			enc, _ := id3Tag.ReadByte() // text encoding
@@ -77,9 +151,14 @@ func ReadID3(buffer *bytes.Reader) {
 			switch enc {
 			case encodingISO8859:
 				reader = charmap.ISO8859_1.NewDecoder().Reader(io.LimitReader(id3Tag, int64(frame.Size)-1))
-			case encodingUTF16WithBOM:
-				win16be := unicode.UTF16(unicode.BigEndian, unicode.UseBOM)
-				reader = transform.NewReader(io.LimitReader(id3Tag, int64(frame.Size)-1), win16be.NewDecoder())
+
+			case encodingUTF16WithBOM, encodingUTF16:
+				encoder := unicode.UTF16(unicode.BigEndian, unicode.UseBOM)
+				reader = transform.NewReader(io.LimitReader(id3Tag, int64(frame.Size)-1), encoder.NewDecoder())
+
+			case encodingUTF8:
+				// Do nothing.
+
 			default:
 				reader = charmap.ISO8859_1.NewDecoder().Reader(io.LimitReader(id3Tag, int64(frame.Size)-1))
 			}
