@@ -98,30 +98,25 @@ var scalefacCompress = [16][2]int{
 	{2, 1}, {2, 2}, {2, 3}, {3, 1}, {3, 2}, {3, 3}, {4, 2}, {4, 3},
 }
 
-type BitReader struct {
-	offset uint
-	bytes  []byte
-}
-
-func (si *BitReader) Bits(n uint) int {
-	buf := make([]byte, 3)
-
-	offset := si.offset / 8
-	copy(buf, si.bytes[offset:])
-	//fmt.Printf("%08b", buf)
-
-	r := int(buf[0])<<16 | int(buf[1])<<8 | int(buf[2])
-	r = r >> (uint(24) - n - si.offset%8) & (0xFFFFFF >> (24 - n))
-
-	si.offset += n
-
-	return r
+var bandIndex = [3][2][]int{
+	{ // Layer 3
+		{0, 4, 8, 12, 16, 20, 24, 30, 36, 44, 52, 62, 74, 90, 110, 134, 162, 196, 238, 288, 342, 418, 576},
+		{0, 4, 8, 12, 16, 22, 30, 40, 52, 66, 84, 106, 136, 192},
+	},
+	{ // Layer 2
+		{0, 4, 8, 12, 16, 20, 24, 30, 36, 42, 50, 60, 72, 88, 106, 128, 156, 190, 230, 276, 330, 384, 576},
+		{0, 4, 8, 12, 16, 22, 28, 38, 50, 64, 80, 100, 126, 192},
+	},
+	{ // Layer 1
+		{0, 4, 8, 12, 16, 20, 24, 30, 36, 44, 54, 66, 82, 102, 126, 156, 194, 240, 296, 364, 448, 550, 576},
+		{0, 4, 8, 12, 16, 22, 30, 42, 58, 78, 104, 138, 180, 192},
+	},
 }
 
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	content, err := ioutil.ReadFile("")
+	content, err := ioutil.ReadFile("Lumen-Gosudarstvo.mp3")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -190,44 +185,41 @@ func main() {
 		file.Read(buf)
 		//fmt.Printf("%08b\n", bitReader.bytes)
 
-		bitReader := BitReader{
-			0,
-			buf,
-		}
+		bitReader := NewPlainBitReader(bytes.NewBuffer(buf))
 
 		sideInfo := SideInformation{}
-		sideInfo.MainDataBegin = uint16(bitReader.Bits(9)) // main_data_begin
+		sideInfo.MainDataBegin = uint16(bitReader.MustReadBits(9)) // main_data_begin
 
 		if header.Mode == modeSingleChannel {
-			sideInfo.PrivateBits = byte(bitReader.Bits(5)) // private_bits
+			sideInfo.PrivateBits = byte(bitReader.MustReadBits(5)) // private_bits
 		} else {
-			sideInfo.PrivateBits = byte(bitReader.Bits(3)) // private_bits
+			sideInfo.PrivateBits = byte(bitReader.MustReadBits(3)) // private_bits
 		}
 
 		for ch := 0; ch < nch; ch++ {
 			for band := 0; band < 4; band++ {
-				sideInfo.Scfsi[ch][band] = byte(bitReader.Bits(1)) // scfsi[ch][scfsi_band]
+				sideInfo.Scfsi[ch][band] = byte(bitReader.MustReadBits(1)) // scfsi[ch][scfsi_band]
 			}
 		}
 
 		for gr := 0; gr < 2; gr++ { // 2 granules for MPEG1, 1 granules for MPEG2
 			for ch := 0; ch < nch; ch++ {
-				sideInfo.Part23Length[gr][ch] = uint16(bitReader.Bits(12))      // part2_3_length[gr][ch]
-				sideInfo.BigValues[gr][ch] = uint16(bitReader.Bits(9))          // big_values[gr][ch]
-				sideInfo.GlobalGain[gr][ch] = uint8(bitReader.Bits(8))          // global_gain[gr][ch]
-				sideInfo.ScalefacCompress[gr][ch] = byte(bitReader.Bits(4))     // scalefac_compress[gr][ch]
-				sideInfo.WindowsSwitchingFlag[gr][ch] = byte(bitReader.Bits(1)) // window_switching_flag[gr][ch]
+				sideInfo.Part23Length[gr][ch] = uint16(bitReader.MustReadBits(12))      // part2_3_length[gr][ch]
+				sideInfo.BigValues[gr][ch] = uint16(bitReader.MustReadBits(9))          // big_values[gr][ch]
+				sideInfo.GlobalGain[gr][ch] = uint8(bitReader.MustReadBits(8))          // global_gain[gr][ch]
+				sideInfo.ScalefacCompress[gr][ch] = byte(bitReader.MustReadBits(4))     // scalefac_compress[gr][ch]
+				sideInfo.WindowsSwitchingFlag[gr][ch] = byte(bitReader.MustReadBits(1)) // window_switching_flag[gr][ch]
 
 				if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 {
-					sideInfo.BlockType[gr][ch] = byte(bitReader.Bits(2))       // block_type[gr][ch]
-					sideInfo.MixedBlockFlag[gr][ch] = uint8(bitReader.Bits(1)) // mixed_block_flag[gr][ch]
+					sideInfo.BlockType[gr][ch] = byte(bitReader.MustReadBits(2))       // block_type[gr][ch]
+					sideInfo.MixedBlockFlag[gr][ch] = uint8(bitReader.MustReadBits(1)) // mixed_block_flag[gr][ch]
 
 					for region := 0; region < 2; region++ {
-						sideInfo.TableSelect[gr][ch][region] = byte(bitReader.Bits(5)) // table_select[gr][ch][region]
+						sideInfo.TableSelect[gr][ch][region] = byte(bitReader.MustReadBits(5)) // table_select[gr][ch][region]
 					}
 
 					for window := 0; window < 3; window++ {
-						sideInfo.SubblockGain[gr][ch][window] = uint8(bitReader.Bits(3)) // subblock_gain[gr][ch][window]
+						sideInfo.SubblockGain[gr][ch][window] = uint8(bitReader.MustReadBits(3)) // subblock_gain[gr][ch][window]
 					}
 
 					// TODO Clarify default values
@@ -238,24 +230,25 @@ func main() {
 					} else if blockType == 2 && mixedBlock != 1 {
 						sideInfo.Region0Count[gr][ch] = 8 // 9
 					}
-					sideInfo.Region1Count[gr][ch] = 36 // 63 or 0
+					//sideInfo.Region1Count[gr][ch] = 36 // 63 or 0
+					sideInfo.Region1Count[gr][ch] = 20 - sideInfo.Region0Count[gr][ch]
 
 				} else {
 					for region := 0; region < 3; region++ {
-						sideInfo.TableSelect[gr][ch][region] = byte(bitReader.Bits(5)) // table_select[gr][ch][region]
+						sideInfo.TableSelect[gr][ch][region] = byte(bitReader.MustReadBits(5)) // table_select[gr][ch][region]
 					}
 
-					sideInfo.Region0Count[gr][ch] = byte(bitReader.Bits(4)) // region0_count[gr][ch]
-					sideInfo.Region1Count[gr][ch] = byte(bitReader.Bits(3)) // region1_count[gr][ch]
+					sideInfo.Region0Count[gr][ch] = byte(bitReader.MustReadBits(4)) // region0_count[gr][ch]
+					sideInfo.Region1Count[gr][ch] = byte(bitReader.MustReadBits(3)) // region1_count[gr][ch]
 				}
 
-				sideInfo.Preflag[gr][ch] = byte(bitReader.Bits(1))           // preflag[gr][ch]
-				sideInfo.ScalfacScale[gr][ch] = byte(bitReader.Bits(1))      // scalefac_scale[gr][ch]
-				sideInfo.Count1tableSelect[gr][ch] = byte(bitReader.Bits(1)) // count1table_select[gr][ch]
+				sideInfo.Preflag[gr][ch] = byte(bitReader.MustReadBits(1))           // preflag[gr][ch]
+				sideInfo.ScalfacScale[gr][ch] = byte(bitReader.MustReadBits(1))      // scalefac_scale[gr][ch]
+				sideInfo.Count1tableSelect[gr][ch] = byte(bitReader.MustReadBits(1)) // count1table_select[gr][ch]
 			}
 		}
 
-		fmt.Printf("%+v, %d\n", sideInfo, bitReader.offset)
+		fmt.Printf("%+v\n", sideInfo)
 
 		// Main Data ==================================================================================================
 		mainDataLength := frameLength - sideInformationLength - 4 // 4 bytes header
@@ -273,11 +266,7 @@ func main() {
 
 		prevData = mainData
 
-		// TODO refactor reader?
-		bitReader = BitReader{
-			0,
-			mainData,
-		}
+		bitReader = NewPlainBitReader(bytes.NewBuffer(mainData))
 
 		scalefac := Scalefac{}
 
@@ -286,72 +275,122 @@ func main() {
 				slen1 := scalefacCompress[sideInfo.ScalefacCompress[gr][ch]][0]
 				slen2 := scalefacCompress[sideInfo.ScalefacCompress[gr][ch]][1]
 
-				var part2Length int
+				//var part2Length int
 				if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == blockShort {
-					if sideInfo.MixedBlockFlag[gr][ch] == 1 {
-						part2Length = 17*slen1 + 18*slen2 // part2_length all bit length
+					if sideInfo.MixedBlockFlag[gr][ch] == 1 { // Long blocks
+						//part2Length = 17*slen1 + 18*slen2 // part2_length all bit length
 
 						for sfb := 0; sfb < 8; sfb++ { // scalefactors bands
-							scalefac.L[gr][ch][sfb] = byte(bitReader.Bits(uint(slen1))) // TODO BitReader
+							scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
 						}
 						for sfb := 3; sfb < 6; sfb++ {
 							for window := 0; window < 3; window++ {
-								scalefac.S[gr][ch][sfb][window] = byte(bitReader.Bits(uint(slen1))) // TODO BitReader
+								scalefac.S[gr][ch][sfb][window] = byte(bitReader.MustReadBits(int64(slen1)))
 							}
 						}
-						for sfb := 6; sfb < 12; sfb++ {
-							for window := 0; window < 3; window++ {
-								scalefac.S[gr][ch][sfb][window] = byte(bitReader.Bits(uint(slen2))) // TODO BitReader
-							}
-						}
-					} else {
-						part2Length = 18*slen1 + 18*slen2 // part2_length all bit length
+
+					} else { // Short blocks
+						//part2Length = 18*slen1 + 18*slen2 // part2_length all bit length
 
 						for sfb := 0; sfb < 6; sfb++ {
 							for window := 0; window < 3; window++ {
-								scalefac.S[gr][ch][sfb][window] = byte(bitReader.Bits(uint(slen1))) // TODO BitReader
-							}
-						}
-						for sfb := 6; sfb < 12; sfb++ {
-							for window := 0; window < 3; window++ {
-								scalefac.S[gr][ch][sfb][window] = byte(bitReader.Bits(uint(slen2))) // TODO BitReader
+								scalefac.S[gr][ch][sfb][window] = byte(bitReader.MustReadBits(int64(slen1)))
 							}
 						}
 					}
+
+					for sfb := 6; sfb < 12; sfb++ {
+						for window := 0; window < 3; window++ {
+							scalefac.S[gr][ch][sfb][window] = byte(bitReader.MustReadBits(int64(slen2)))
+						}
+					}
+
 				} else {
-					part2Length = 11*slen1 + 10*slen2 // part2_length all bit length
+					//part2Length = 11*slen1 + 10*slen2 // part2_length all bit length
 
-					if sideInfo.Scfsi[ch][0] == 0 || gr == 0 {
+					if gr == 0 {
+						for sfb := 0; sfb < 11; sfb++ {
+							scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+						}
+						for sfb := 11; sfb < 21; sfb++ {
+							scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen2)))
+						}
+
+					} else {
 						for sfb := 0; sfb < 6; sfb++ {
-							scalefac.L[gr][ch][sfb] = byte(bitReader.Bits(uint(slen1))) // TODO BitReader
+							if sideInfo.Scfsi[ch][0] == 0 {
+								scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+							} else {
+								scalefac.L[gr][ch][sfb] = scalefac.L[0][ch][sfb]
+							}
 						}
-					}
-					if sideInfo.Scfsi[ch][1] == 0 || gr == 0 {
 						for sfb := 6; sfb < 11; sfb++ {
-							scalefac.L[gr][ch][sfb] = byte(bitReader.Bits(uint(slen1))) // TODO BitReader
+							if sideInfo.Scfsi[ch][1] == 0 {
+								scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+							} else {
+								scalefac.L[gr][ch][sfb] = scalefac.L[0][ch][sfb]
+							}
 						}
-					}
-					if sideInfo.Scfsi[ch][2] == 0 || gr == 0 {
 						for sfb := 11; sfb < 16; sfb++ {
-							scalefac.L[gr][ch][sfb] = byte(bitReader.Bits(uint(slen2))) // TODO BitReader
+							if sideInfo.Scfsi[ch][2] == 0 {
+								scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+							} else {
+								scalefac.L[gr][ch][sfb] = scalefac.L[0][ch][sfb]
+							}
 						}
-					}
-					if sideInfo.Scfsi[ch][3] == 0 || gr == 0 {
 						for sfb := 16; sfb < 21; sfb++ {
-							scalefac.L[gr][ch][sfb] = byte(bitReader.Bits(uint(slen2))) // TODO BitReader
+							if sideInfo.Scfsi[ch][3] == 0 {
+								scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+							} else {
+								scalefac.L[gr][ch][sfb] = scalefac.L[0][ch][sfb]
+							}
 						}
 					}
 				}
 
 				// Huffman code ===============================================================================================
-				//bit_pos_end := part2Length + int(sideInfo.Part23Length[gr][ch]) - 1
-				huffmanCodeLength := int(sideInfo.Part23Length[gr][ch]) - part2Length // int bits
-				fmt.Printf("bit %d %d", part2Length, huffmanCodeLength)
+				//huffmanCodeLength := int(sideInfo.Part23Length[gr][ch]) - part2Length // int bits
+				//fmt.Printf("bit %d %d %d ", int(sideInfo.Part23Length[gr][ch]), part2Length, huffmanCodeLength)
+				//fmt.Printf("table region0: %d region1: %d region2: %d", sideInfo.TableSelect[gr][ch][0], sideInfo.TableSelect[gr][ch][1], sideInfo.TableSelect[gr][ch][2])
 
-				for i := 0; i <= huffmanCodeLength; i++ {
-					bitReader.Bits(1)
+				//samples := [576]int{}
+
+				var region0 int
+				var region1 int
+				if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == 2 {
+					region0 = 36
+					region1 = 576
+				} else {
+					region0 = bandIndex[header.Layer][0][sideInfo.Region0Count[gr][ch]+1]
+					region1 = bandIndex[header.Layer][0][sideInfo.Region0Count[gr][ch]+1+sideInfo.Region1Count[gr][ch]+1]
 				}
+				fmt.Printf("region0 %+v region1 %+v\n", region0, region1)
+
+				var tableNum int
+				for sample := 0; sample < int(sideInfo.BigValues[gr][ch])*2; sample += 2 {
+					if sample < region0 {
+						tableNum = int(sideInfo.TableSelect[gr][ch][0])
+					} else if sample < region1 {
+						tableNum = int(sideInfo.TableSelect[gr][ch][1])
+					} else {
+						tableNum = int(sideInfo.TableSelect[gr][ch][2])
+					}
+
+					if tableNum == 0 {
+						continue
+					}
+
+					//bitSample := bitReader.MustReadBits(32)
+					//fmt.Printf("%x ", bitSample)
+					//x, y, _, _, err := decode()
+				}
+
+				fmt.Println(tableNum)
 				fmt.Println()
+
+				//for i := 0; i <= huffmanCodeLength; i++ {
+				//	bitReader.MustReadBits(1)
+				//}
 			}
 		}
 		fmt.Printf("%+v\n", scalefac)
