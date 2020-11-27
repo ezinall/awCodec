@@ -1,6 +1,8 @@
 package main
 
-import "io"
+import (
+	"io"
+)
 
 type PlainBitReader struct {
 	reader io.ByteReader
@@ -77,21 +79,25 @@ func (bitReader *PlainBitReader) MustReadBits(bits int64) uint64 {
 
 // Old
 type BitReader struct {
-	offset uint
+	offset int
 	bytes  []byte
 }
 
-func (si *BitReader) Bits(n uint) int {
-	buf := make([]byte, 3)
+func NewBitReader(b []byte) *BitReader {
+	return &BitReader{0, b}
+}
+
+func (si *BitReader) ReadBits(n int) int {
+	buf := make([]byte, 5)
 
 	offset := si.offset / 8
 	copy(buf, si.bytes[offset:])
 	//fmt.Printf("%08b", buf)
 
-	r := int(buf[0])<<16 | int(buf[1])<<8 | int(buf[2])
-	r = r >> (uint(24) - n - si.offset%8) & (0xFFFFFF >> (24 - n))
+	r := uint64(buf[0])<<32 | uint64(buf[1])<<24 | uint64(buf[2])<<16 | uint64(buf[3])<<8 | uint64(buf[4])
+	r = r >> (40 - (n + si.offset%8)) & (0xFFFFFFFFFFFFFFFF >> (64 - n))
 
 	si.offset += n
 
-	return r
+	return int(r)
 }

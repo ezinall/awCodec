@@ -86,6 +86,10 @@ const (
 	blockStart    = 0x1 // Start block
 	blockShort    = 0x2 // 3 short block
 	blockEnd      = 0x3 // End block
+
+	iblen = 576 // Frequency lines of each granule
+
+	maxTableEntry = 15 // Maximum Huffman table entry index
 )
 
 type Scalefac struct {
@@ -116,7 +120,7 @@ var bandIndex = [3][2][]int{
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	content, err := ioutil.ReadFile("Lumen-Gosudarstvo.mp3")
+	content, err := ioutil.ReadFile("Lumen - Государство (1).mp3")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -185,66 +189,69 @@ func main() {
 		file.Read(buf)
 		//fmt.Printf("%08b\n", bitReader.bytes)
 
-		bitReader := NewPlainBitReader(bytes.NewBuffer(buf))
+		bitReader := NewBitReader(buf)
 
 		sideInfo := SideInformation{}
-		sideInfo.MainDataBegin = uint16(bitReader.MustReadBits(9)) // main_data_begin
+		sideInfo.MainDataBegin = uint16(bitReader.ReadBits(9)) // main_data_begin
 
 		if header.Mode == modeSingleChannel {
-			sideInfo.PrivateBits = byte(bitReader.MustReadBits(5)) // private_bits
+			sideInfo.PrivateBits = byte(bitReader.ReadBits(5)) // private_bits
 		} else {
-			sideInfo.PrivateBits = byte(bitReader.MustReadBits(3)) // private_bits
+			sideInfo.PrivateBits = byte(bitReader.ReadBits(3)) // private_bits
 		}
 
 		for ch := 0; ch < nch; ch++ {
 			for band := 0; band < 4; band++ {
-				sideInfo.Scfsi[ch][band] = byte(bitReader.MustReadBits(1)) // scfsi[ch][scfsi_band]
+				sideInfo.Scfsi[ch][band] = byte(bitReader.ReadBits(1)) // scfsi[ch][scfsi_band]
 			}
 		}
 
 		for gr := 0; gr < 2; gr++ { // 2 granules for MPEG1, 1 granules for MPEG2
 			for ch := 0; ch < nch; ch++ {
-				sideInfo.Part23Length[gr][ch] = uint16(bitReader.MustReadBits(12))      // part2_3_length[gr][ch]
-				sideInfo.BigValues[gr][ch] = uint16(bitReader.MustReadBits(9))          // big_values[gr][ch]
-				sideInfo.GlobalGain[gr][ch] = uint8(bitReader.MustReadBits(8))          // global_gain[gr][ch]
-				sideInfo.ScalefacCompress[gr][ch] = byte(bitReader.MustReadBits(4))     // scalefac_compress[gr][ch]
-				sideInfo.WindowsSwitchingFlag[gr][ch] = byte(bitReader.MustReadBits(1)) // window_switching_flag[gr][ch]
+				sideInfo.Part23Length[gr][ch] = uint16(bitReader.ReadBits(12))      // part2_3_length[gr][ch]
+				sideInfo.BigValues[gr][ch] = uint16(bitReader.ReadBits(9))          // big_values[gr][ch]
+				sideInfo.GlobalGain[gr][ch] = uint8(bitReader.ReadBits(8))          // global_gain[gr][ch]
+				sideInfo.ScalefacCompress[gr][ch] = byte(bitReader.ReadBits(4))     // scalefac_compress[gr][ch]
+				sideInfo.WindowsSwitchingFlag[gr][ch] = byte(bitReader.ReadBits(1)) // window_switching_flag[gr][ch]
 
 				if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 {
-					sideInfo.BlockType[gr][ch] = byte(bitReader.MustReadBits(2))       // block_type[gr][ch]
-					sideInfo.MixedBlockFlag[gr][ch] = uint8(bitReader.MustReadBits(1)) // mixed_block_flag[gr][ch]
+					sideInfo.BlockType[gr][ch] = byte(bitReader.ReadBits(2))       // block_type[gr][ch]
+					sideInfo.MixedBlockFlag[gr][ch] = uint8(bitReader.ReadBits(1)) // mixed_block_flag[gr][ch]
 
 					for region := 0; region < 2; region++ {
-						sideInfo.TableSelect[gr][ch][region] = byte(bitReader.MustReadBits(5)) // table_select[gr][ch][region]
+						sideInfo.TableSelect[gr][ch][region] = byte(bitReader.ReadBits(5)) // table_select[gr][ch][region]
 					}
 
 					for window := 0; window < 3; window++ {
-						sideInfo.SubblockGain[gr][ch][window] = uint8(bitReader.MustReadBits(3)) // subblock_gain[gr][ch][window]
+						sideInfo.SubblockGain[gr][ch][window] = uint8(bitReader.ReadBits(3)) // subblock_gain[gr][ch][window]
 					}
 
-					// TODO Clarify default values
+					// Set default if window switching set
 					blockType := sideInfo.BlockType[gr][ch]
 					mixedBlock := sideInfo.MixedBlockFlag[gr][ch]
 					if blockType == 1 || blockType == 3 || blockType == 2 && mixedBlock == 1 {
-						sideInfo.Region0Count[gr][ch] = 7 // 8
+						sideInfo.Region0Count[gr][ch] = 7
 					} else if blockType == 2 && mixedBlock != 1 {
-						sideInfo.Region0Count[gr][ch] = 8 // 9
+						sideInfo.Region0Count[gr][ch] = 8
 					}
-					//sideInfo.Region1Count[gr][ch] = 36 // 63 or 0
 					sideInfo.Region1Count[gr][ch] = 20 - sideInfo.Region0Count[gr][ch]
 
 				} else {
+					// Set default if window not switching
+					//sideInfo.BlockType[gr][ch] = 0
+					//sideInfo.MixedBlockFlag[gr][ch] = 0
+
 					for region := 0; region < 3; region++ {
-						sideInfo.TableSelect[gr][ch][region] = byte(bitReader.MustReadBits(5)) // table_select[gr][ch][region]
+						sideInfo.TableSelect[gr][ch][region] = byte(bitReader.ReadBits(5)) // table_select[gr][ch][region]
 					}
 
-					sideInfo.Region0Count[gr][ch] = byte(bitReader.MustReadBits(4)) // region0_count[gr][ch]
-					sideInfo.Region1Count[gr][ch] = byte(bitReader.MustReadBits(3)) // region1_count[gr][ch]
+					sideInfo.Region0Count[gr][ch] = byte(bitReader.ReadBits(4)) // region0_count[gr][ch]
+					sideInfo.Region1Count[gr][ch] = byte(bitReader.ReadBits(3)) // region1_count[gr][ch]
 				}
 
-				sideInfo.Preflag[gr][ch] = byte(bitReader.MustReadBits(1))           // preflag[gr][ch]
-				sideInfo.ScalfacScale[gr][ch] = byte(bitReader.MustReadBits(1))      // scalefac_scale[gr][ch]
-				sideInfo.Count1tableSelect[gr][ch] = byte(bitReader.MustReadBits(1)) // count1table_select[gr][ch]
+				sideInfo.Preflag[gr][ch] = byte(bitReader.ReadBits(1))           // preflag[gr][ch]
+				sideInfo.ScalfacScale[gr][ch] = byte(bitReader.ReadBits(1))      // scalefac_scale[gr][ch]
+				sideInfo.Count1tableSelect[gr][ch] = byte(bitReader.ReadBits(1)) // count1table_select[gr][ch]
 			}
 		}
 
@@ -266,7 +273,7 @@ func main() {
 
 		prevData = mainData
 
-		bitReader = NewPlainBitReader(bytes.NewBuffer(mainData))
+		bitReader = NewBitReader(mainData)
 
 		scalefac := Scalefac{}
 
@@ -275,17 +282,17 @@ func main() {
 				slen1 := scalefacCompress[sideInfo.ScalefacCompress[gr][ch]][0]
 				slen2 := scalefacCompress[sideInfo.ScalefacCompress[gr][ch]][1]
 
-				//var part2Length int
+				//var part2Length int // Number of bits used for scalefactors
 				if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == blockShort {
-					if sideInfo.MixedBlockFlag[gr][ch] == 1 { // Long blocks
+					if sideInfo.MixedBlockFlag[gr][ch] == 1 { // Mixed blocks
 						//part2Length = 17*slen1 + 18*slen2 // part2_length all bit length
 
 						for sfb := 0; sfb < 8; sfb++ { // scalefactors bands
-							scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+							scalefac.L[gr][ch][sfb] = byte(bitReader.ReadBits(slen1))
 						}
 						for sfb := 3; sfb < 6; sfb++ {
 							for window := 0; window < 3; window++ {
-								scalefac.S[gr][ch][sfb][window] = byte(bitReader.MustReadBits(int64(slen1)))
+								scalefac.S[gr][ch][sfb][window] = byte(bitReader.ReadBits(slen1))
 							}
 						}
 
@@ -294,53 +301,53 @@ func main() {
 
 						for sfb := 0; sfb < 6; sfb++ {
 							for window := 0; window < 3; window++ {
-								scalefac.S[gr][ch][sfb][window] = byte(bitReader.MustReadBits(int64(slen1)))
+								scalefac.S[gr][ch][sfb][window] = byte(bitReader.ReadBits(slen1))
 							}
 						}
 					}
 
 					for sfb := 6; sfb < 12; sfb++ {
 						for window := 0; window < 3; window++ {
-							scalefac.S[gr][ch][sfb][window] = byte(bitReader.MustReadBits(int64(slen2)))
+							scalefac.S[gr][ch][sfb][window] = byte(bitReader.ReadBits(slen2))
 						}
 					}
 
-				} else {
+				} else { // Long blocks
 					//part2Length = 11*slen1 + 10*slen2 // part2_length all bit length
 
 					if gr == 0 {
 						for sfb := 0; sfb < 11; sfb++ {
-							scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+							scalefac.L[gr][ch][sfb] = byte(bitReader.ReadBits(slen1))
 						}
 						for sfb := 11; sfb < 21; sfb++ {
-							scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen2)))
+							scalefac.L[gr][ch][sfb] = byte(bitReader.ReadBits(slen2))
 						}
 
 					} else {
 						for sfb := 0; sfb < 6; sfb++ {
 							if sideInfo.Scfsi[ch][0] == 0 {
-								scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+								scalefac.L[gr][ch][sfb] = byte(bitReader.ReadBits(slen1))
 							} else {
 								scalefac.L[gr][ch][sfb] = scalefac.L[0][ch][sfb]
 							}
 						}
 						for sfb := 6; sfb < 11; sfb++ {
 							if sideInfo.Scfsi[ch][1] == 0 {
-								scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+								scalefac.L[gr][ch][sfb] = byte(bitReader.ReadBits(slen1))
 							} else {
 								scalefac.L[gr][ch][sfb] = scalefac.L[0][ch][sfb]
 							}
 						}
 						for sfb := 11; sfb < 16; sfb++ {
 							if sideInfo.Scfsi[ch][2] == 0 {
-								scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+								scalefac.L[gr][ch][sfb] = byte(bitReader.ReadBits(slen2))
 							} else {
 								scalefac.L[gr][ch][sfb] = scalefac.L[0][ch][sfb]
 							}
 						}
 						for sfb := 16; sfb < 21; sfb++ {
 							if sideInfo.Scfsi[ch][3] == 0 {
-								scalefac.L[gr][ch][sfb] = byte(bitReader.MustReadBits(int64(slen1)))
+								scalefac.L[gr][ch][sfb] = byte(bitReader.ReadBits(slen2))
 							} else {
 								scalefac.L[gr][ch][sfb] = scalefac.L[0][ch][sfb]
 							}
@@ -350,10 +357,9 @@ func main() {
 
 				// Huffman code ===============================================================================================
 				//huffmanCodeLength := int(sideInfo.Part23Length[gr][ch]) - part2Length // int bits
-				//fmt.Printf("bit %d %d %d ", int(sideInfo.Part23Length[gr][ch]), part2Length, huffmanCodeLength)
-				//fmt.Printf("table region0: %d region1: %d region2: %d", sideInfo.TableSelect[gr][ch][0], sideInfo.TableSelect[gr][ch][1], sideInfo.TableSelect[gr][ch][2])
+				part23Length := int(sideInfo.Part23Length[gr][ch]) // int bits
 
-				//samples := [576]int{}
+				var samples [iblen]float32
 
 				var region0 int
 				var region1 int
@@ -361,13 +367,14 @@ func main() {
 					region0 = 36
 					region1 = 576
 				} else {
-					region0 = bandIndex[header.Layer][0][sideInfo.Region0Count[gr][ch]+1]
-					region1 = bandIndex[header.Layer][0][sideInfo.Region0Count[gr][ch]+1+sideInfo.Region1Count[gr][ch]+1]
+					region0 = bandIndex[header.Layer-1][0][sideInfo.Region0Count[gr][ch]+1]
+					region1 = bandIndex[header.Layer-1][0][sideInfo.Region0Count[gr][ch]+1+sideInfo.Region1Count[gr][ch]+1]
 				}
 				fmt.Printf("region0 %+v region1 %+v\n", region0, region1)
 
-				var tableNum int
-				for sample := 0; sample < int(sideInfo.BigValues[gr][ch])*2; sample += 2 {
+				sample := 0
+				for ; sample < int(sideInfo.BigValues[gr][ch])*2; sample += 2 {
+					tableNum := 0
 					if sample < region0 {
 						tableNum = int(sideInfo.TableSelect[gr][ch][0])
 					} else if sample < region1 {
@@ -380,20 +387,96 @@ func main() {
 						continue
 					}
 
-					//bitSample := bitReader.MustReadBits(32)
-					//fmt.Printf("%x ", bitSample)
-					//x, y, _, _, err := decode()
+					x, y, _, _ := decodeHuffman(bitReader, tableNum)
+
+					samples[sample] = float32(x)
+					samples[sample+1] = float32(y)
 				}
 
-				fmt.Println(tableNum)
-				fmt.Println()
+				for ; sample+4 <= iblen && bitReader.offset < part23Length; sample += 4 {
+					var v, w, x, y int
+					if sideInfo.Count1tableSelect[gr][ch] == 1 {
+						v = bitReader.ReadBits(1) ^ 1
+						w = bitReader.ReadBits(1) ^ 1
+						x = bitReader.ReadBits(1) ^ 1
+						y = bitReader.ReadBits(1) ^ 1
+					} else {
+						bitSample := bitReader.ReadBits(32)
+						for _, k := range huffmanTableA {
+							hcod := k[0]
+							hlen := k[1]
 
-				//for i := 0; i <= huffmanCodeLength; i++ {
-				//	bitReader.MustReadBits(1)
-				//}
+							if hcod == bitSample>>(32-hlen) {
+								bitReader.offset -= 32 - hlen
+								v = k[2] & 0x8
+								w = k[2] & 0x4
+								x = k[2] & 0x2
+								y = k[2] & 0x1
+
+								break
+							}
+						}
+					}
+
+					if v != 0 && bitReader.ReadBits(1) == 1 {
+						v = -v
+					}
+					if w != 0 && bitReader.ReadBits(1) == 1 {
+						w = -w
+					}
+					if x != 0 && bitReader.ReadBits(1) == 1 {
+						x = -x
+					}
+					if y != 0 && bitReader.ReadBits(1) == 1 {
+						y = -y
+					}
+
+					samples[sample] = float32(v)
+					samples[sample+1] = float32(w)
+					samples[sample+2] = float32(x)
+					samples[sample+3] = float32(y)
+				}
+				fmt.Println(sample, iblen, bitReader.offset, part23Length)
+
+				fmt.Println(samples)
+				//fmt.Println(bitReader.offset, huffmanCodeLength-bitReader.offset)
 			}
 		}
 		fmt.Printf("%+v\n", scalefac)
 		fmt.Println("==================================================")
 	}
+}
+
+func decodeHuffman(r *BitReader, tableNumber int) (x, y, v, w int) {
+	table := tables[tableNumber]
+
+	bitSample := r.ReadBits(32)
+	for x, v := range table.Table {
+		for y, k := range v {
+			//i := 2 * len(v) * x + 2 * y
+			hcod := k[0]
+			hlen := k[1]
+
+			if hcod == bitSample>>(32-hlen) {
+				r.offset -= 32 - hlen
+
+				if table.Linbits != 0 && x == maxTableEntry {
+					x += r.ReadBits(table.Linbits)
+				}
+				if x != 0 && r.ReadBits(1) == 1 {
+					x = -x
+				}
+
+				if table.Linbits != 0 && y == maxTableEntry {
+					y += r.ReadBits(table.Linbits) //
+				}
+				if y != 0 && r.ReadBits(1) == 1 {
+					y = -y // linbit
+				}
+				return x, y, 0, 0
+			}
+		}
+	}
+	r.offset -= 32
+	return x, y, v, w
 }
