@@ -79,25 +79,31 @@ func (bitReader *PlainBitReader) MustReadBits(bits int64) uint64 {
 
 // Old
 type BitReader struct {
-	offset int
-	bytes  []byte
+	offset  int
+	bytes   []byte
+	counter int
 }
 
 func NewBitReader(b []byte) *BitReader {
-	return &BitReader{0, b}
+	return &BitReader{0, b, 0}
 }
 
-func (si *BitReader) ReadBits(n int) int {
-	buf := make([]byte, 5)
+func (bitReader *BitReader) ReadBits(n int) int {
+	buf := make([]byte, 4)
 
-	offset := si.offset / 8
-	copy(buf, si.bytes[offset:])
+	offset := bitReader.offset / 8
+	copy(buf, bitReader.bytes[offset:])
 	//fmt.Printf("%08b", buf)
 
-	r := uint64(buf[0])<<32 | uint64(buf[1])<<24 | uint64(buf[2])<<16 | uint64(buf[3])<<8 | uint64(buf[4])
-	r = r >> (40 - (n + si.offset%8)) & (0xFFFFFFFFFFFFFFFF >> (64 - n))
+	r := uint32(buf[0])<<24 | uint32(buf[1])<<16 | uint32(buf[2])<<8 | uint32(buf[3])
+	r = r >> (32 - (n + bitReader.offset%8)) & (0xFFFFFFFF >> (32 - n))
 
-	si.offset += n
-
+	bitReader.offset += n
+	bitReader.counter += n
 	return int(r)
+}
+
+func (bitReader *BitReader) Seek(n int) {
+	bitReader.offset += n
+	bitReader.counter += n
 }

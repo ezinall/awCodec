@@ -120,7 +120,7 @@ var bandIndex = [3][2][]int{
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	content, err := ioutil.ReadFile("Lumen - Государство (1).mp3")
+	content, err := ioutil.ReadFile("")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -276,9 +276,12 @@ func main() {
 		bitReader = NewBitReader(mainData)
 
 		scalefac := Scalefac{}
+		var samples [2][2][iblen]float32
 
 		for gr := 0; gr < 2; gr++ {
 			for ch := 0; ch < nch; ch++ {
+				bitReader.counter = 0
+
 				slen1 := scalefacCompress[sideInfo.ScalefacCompress[gr][ch]][0]
 				slen2 := scalefacCompress[sideInfo.ScalefacCompress[gr][ch]][1]
 
@@ -356,10 +359,7 @@ func main() {
 				}
 
 				// Huffman code ===============================================================================================
-				//huffmanCodeLength := int(sideInfo.Part23Length[gr][ch]) - part2Length // int bits
 				part23Length := int(sideInfo.Part23Length[gr][ch]) // int bits
-
-				var samples [iblen]float32
 
 				var region0 int
 				var region1 int
@@ -389,11 +389,14 @@ func main() {
 
 					x, y, _, _ := decodeHuffman(bitReader, tableNum)
 
-					samples[sample] = float32(x)
-					samples[sample+1] = float32(y)
+					samples[gr][ch][sample] = float32(x)
+					samples[gr][ch][sample+1] = float32(y)
 				}
 
-				for ; sample+4 <= iblen && bitReader.offset < part23Length; sample += 4 {
+				//count1 := 0
+				for ; sample+4 <= iblen && bitReader.counter < part23Length; sample += 4 {
+					//count1++
+
 					var v, w, x, y int
 					if sideInfo.Count1tableSelect[gr][ch] == 1 {
 						v = bitReader.ReadBits(1) ^ 1
@@ -401,21 +404,7 @@ func main() {
 						x = bitReader.ReadBits(1) ^ 1
 						y = bitReader.ReadBits(1) ^ 1
 					} else {
-						bitSample := bitReader.ReadBits(32)
-						for _, k := range huffmanTableA {
-							hcod := k[0]
-							hlen := k[1]
-
-							if hcod == bitSample>>(32-hlen) {
-								bitReader.offset -= 32 - hlen
-								v = k[2] & 0x8
-								w = k[2] & 0x4
-								x = k[2] & 0x2
-								y = k[2] & 0x1
-
-								break
-							}
-						}
+						v, w, x, y = decodeHuffmanB(bitReader)
 					}
 
 					if v != 0 && bitReader.ReadBits(1) == 1 {
@@ -431,18 +420,18 @@ func main() {
 						y = -y
 					}
 
-					samples[sample] = float32(v)
-					samples[sample+1] = float32(w)
-					samples[sample+2] = float32(x)
-					samples[sample+3] = float32(y)
+					samples[gr][ch][sample] = float32(v)
+					samples[gr][ch][sample+1] = float32(w)
+					samples[gr][ch][sample+2] = float32(x)
+					samples[gr][ch][sample+3] = float32(y)
 				}
-				fmt.Println(sample, iblen, bitReader.offset, part23Length)
 
-				fmt.Println(samples)
-				//fmt.Println(bitReader.offset, huffmanCodeLength-bitReader.offset)
+				//fmt.Println(sideInfo.BigValues[gr][ch]*2, count1, part23Length, iblen)
 			}
 		}
 		fmt.Printf("%+v\n", scalefac)
+		//fmt.Printf("%+v\n", samples)
+
 		fmt.Println("==================================================")
 	}
 }
@@ -450,15 +439,14 @@ func main() {
 func decodeHuffman(r *BitReader, tableNumber int) (x, y, v, w int) {
 	table := tables[tableNumber]
 
-	bitSample := r.ReadBits(32)
+	bitSample := r.ReadBits(24)
 	for x, v := range table.Table {
 		for y, k := range v {
-			//i := 2 * len(v) * x + 2 * y
 			hcod := k[0]
 			hlen := k[1]
 
-			if hcod == bitSample>>(32-hlen) {
-				r.offset -= 32 - hlen
+			if hcod == bitSample>>(24-hlen) {
+				r.Seek(-(24 - hlen))
 
 				if table.Linbits != 0 && x == maxTableEntry {
 					x += r.ReadBits(table.Linbits)
@@ -471,12 +459,34 @@ func decodeHuffman(r *BitReader, tableNumber int) (x, y, v, w int) {
 					y += r.ReadBits(table.Linbits) //
 				}
 				if y != 0 && r.ReadBits(1) == 1 {
-					y = -y // linbit
+					y = -y
 				}
+
 				return x, y, 0, 0
 			}
 		}
 	}
-	r.offset -= 32
+	r.Seek(-24)
 	return x, y, v, w
+}
+
+func decodeHuffmanB(r *BitReader) (v, w, x, y int) {
+	bitSample := r.ReadBits(24)
+	for _, k := range huffmanTableA {
+		hcod := k[0]
+		hlen := k[1]
+
+		if hcod == bitSample>>(24-hlen) {
+			r.Seek(-(24 - hlen))
+
+			v = k[2] & 0x8
+			w = k[2] & 0x4
+			x = k[2] & 0x2
+			y = k[2] & 0x1
+
+			return v, w, x, y
+		}
+	}
+	r.Seek(-24)
+	return v, w, x, y
 }
