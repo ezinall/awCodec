@@ -253,3 +253,58 @@ var tables = [...]table{
 	{huffmanTable[106:122], 11}, // Table 30
 	{huffmanTable[106:122], 13}, // Table 31
 }
+
+func decodeHuffman(r *BitReader, tableNumber int) (x, y, v, w int) {
+	table := tables[tableNumber]
+
+	bitSample := r.ReadBits(24)
+	for x, v := range table.Table {
+		for y, k := range v {
+			hcod := k[0]
+			hlen := k[1]
+
+			if hcod == bitSample>>(24-hlen) {
+				r.Seek(-(24 - hlen))
+
+				if x == maxTableEntry && table.Linbits > 0 {
+					x += r.ReadBits(table.Linbits)
+				}
+				if x != 0 && r.ReadBits(1) == 1 {
+					x = -x
+				}
+
+				if y == maxTableEntry && table.Linbits > 0 {
+					y += r.ReadBits(table.Linbits) //
+				}
+				if y != 0 && r.ReadBits(1) == 1 {
+					y = -y
+				}
+
+				return x, y, 0, 0
+			}
+		}
+	}
+	r.Seek(-24)
+	return x, y, v, w
+}
+
+func decodeHuffmanB(r *BitReader) (v, w, x, y int) {
+	bitSample := r.ReadBits(24)
+	for _, k := range huffmanTableA {
+		hcod := k[0]
+		hlen := k[1]
+
+		if hcod == bitSample>>(24-hlen) {
+			r.Seek(-(24 - hlen))
+
+			v = k[2] & 0x8
+			w = k[2] & 0x4
+			x = k[2] & 0x2
+			y = k[2] & 0x1
+
+			return v, w, x, y
+		}
+	}
+	r.Seek(-24)
+	return v, w, x, y
+}

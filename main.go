@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 )
 
 type Header struct {
@@ -94,7 +95,7 @@ const (
 
 type Scalefac struct {
 	L [2][2][21]byte
-	S [2][2][12][3]byte
+	S [2][2][12][3]byte // gr/ch/sfb/window
 }
 
 var scalefacCompress = [16][2]int{
@@ -117,10 +118,16 @@ var bandIndex = [3][2][]int{
 	},
 }
 
+// If it is set, then the values of the Table 11 are added to the scale factors.
+//Preflag table only for SideInformation.BlockType blockShort windows.
+var pretab = [21]int{
+	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 2,
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	content, err := ioutil.ReadFile("")
+	content, err := ioutil.ReadFile("Lumen - Государство (1).mp3")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -276,7 +283,8 @@ func main() {
 		bitReader = NewBitReader(mainData)
 
 		scalefac := Scalefac{}
-		var samples [2][2][iblen]float32
+		var is [2][2][iblen]float32
+		var count1 [2][2]int
 
 		for gr := 0; gr < 2; gr++ {
 			for ch := 0; ch < nch; ch++ {
@@ -285,6 +293,7 @@ func main() {
 				slen1 := scalefacCompress[sideInfo.ScalefacCompress[gr][ch]][0]
 				slen2 := scalefacCompress[sideInfo.ScalefacCompress[gr][ch]][1]
 
+				// Scalefactor
 				//var part2Length int // Number of bits used for scalefactors
 				if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == blockShort {
 					if sideInfo.MixedBlockFlag[gr][ch] == 1 { // Mixed blocks
@@ -358,12 +367,10 @@ func main() {
 					}
 				}
 
-				// Huffman code ===============================================================================================
-				part23Length := int(sideInfo.Part23Length[gr][ch]) // int bits
-
+				// Huffman code =======================================================================================
 				var region0 int
 				var region1 int
-				if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == 2 {
+				if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == blockShort {
 					region0 = 36
 					region1 = 576
 				} else {
@@ -389,13 +396,12 @@ func main() {
 
 					x, y, _, _ := decodeHuffman(bitReader, tableNum)
 
-					samples[gr][ch][sample] = float32(x)
-					samples[gr][ch][sample+1] = float32(y)
+					is[gr][ch][sample] = float32(x)
+					is[gr][ch][sample+1] = float32(y)
 				}
 
-				//count1 := 0
-				for ; sample+4 <= iblen && bitReader.counter < part23Length; sample += 4 {
-					//count1++
+				for ; sample+4 < iblen && bitReader.counter < int(sideInfo.Part23Length[gr][ch]); sample += 4 {
+					count1[gr][ch] += 4
 
 					var v, w, x, y int
 					if sideInfo.Count1tableSelect[gr][ch] == 1 {
@@ -420,73 +426,113 @@ func main() {
 						y = -y
 					}
 
-					samples[gr][ch][sample] = float32(v)
-					samples[gr][ch][sample+1] = float32(w)
-					samples[gr][ch][sample+2] = float32(x)
-					samples[gr][ch][sample+3] = float32(y)
+					is[gr][ch][sample] = float32(v)
+					is[gr][ch][sample+1] = float32(w)
+					is[gr][ch][sample+2] = float32(x)
+					is[gr][ch][sample+3] = float32(y)
 				}
 
 				//fmt.Println(sideInfo.BigValues[gr][ch]*2, count1, part23Length, iblen)
 			}
 		}
-		fmt.Printf("%+v\n", scalefac)
-		//fmt.Printf("%+v\n", samples)
 
+		// ??? ================================================================================================
+		for gr := 0; gr < 2; gr++ {
+			for ch := 0; ch < nch; ch++ {
+				requantize(gr, ch, header, sideInfo, scalefac, &is)
+				reorder(gr, ch, header, sideInfo, &is, count1)
+			}
+		}
+
+		//fmt.Printf("%+v\n", scalefac)
+		//fmt.Printf("%+v\n", is)
 		fmt.Println("==================================================")
 	}
 }
 
-func decodeHuffman(r *BitReader, tableNumber int) (x, y, v, w int) {
-	table := tables[tableNumber]
+func requantize(gr, ch int, header Header, sideInfo SideInformation, scalefac Scalefac, is *[2][2][iblen]float32) {
+	var (
+		A, B float64
+	)
+	sfb := 0
+	window := 0
 
-	bitSample := r.ReadBits(24)
-	for x, v := range table.Table {
-		for y, k := range v {
-			hcod := k[0]
-			hlen := k[1]
-
-			if hcod == bitSample>>(24-hlen) {
-				r.Seek(-(24 - hlen))
-
-				if table.Linbits != 0 && x == maxTableEntry {
-					x += r.ReadBits(table.Linbits)
-				}
-				if x != 0 && r.ReadBits(1) == 1 {
-					x = -x
-				}
-
-				if table.Linbits != 0 && y == maxTableEntry {
-					y += r.ReadBits(table.Linbits) //
-				}
-				if y != 0 && r.ReadBits(1) == 1 {
-					y = -y
-				}
-
-				return x, y, 0, 0
-			}
-		}
+	scalefacMultiplier := 0.5
+	if sideInfo.ScalfacScale[gr][ch] == 0 {
+		scalefacMultiplier = 1
 	}
-	r.Seek(-24)
-	return x, y, v, w
+
+	for i, sample := 0, 0; sample < iblen; i, sample = i+1, sample+1 {
+		if sideInfo.BlockType[gr][ch] == blockShort || sideInfo.MixedBlockFlag[gr][ch] == 1 && sfb >= 8 { // Short blocks
+			if i == bandIndex[header.Layer-1][1][sfb] {
+				i = 0
+				if window == 2 {
+					window = 0
+					sfb++
+				} else {
+					window++
+				}
+			}
+
+			A = float64(sideInfo.GlobalGain[gr][ch] - 210.0 - 8.0*sideInfo.SubblockGain[gr][ch][window])
+			B = scalefacMultiplier * float64(scalefac.S[gr][ch][sfb][window])
+
+		} else { // Long blocks
+			if sample == bandIndex[header.Layer-1][0][sfb+2] { // sfb+1 ВОЗМОЖНО ОШИБКА!!!
+				sfb++
+			}
+
+			A = float64(sideInfo.GlobalGain[gr][ch]) - 210.0
+			B = scalefacMultiplier * float64(scalefac.L[gr][ch][sfb]+sideInfo.Preflag[gr][ch]*byte(pretab[sfb]))
+		}
+
+		sign := math.Copysign(1, float64(is[gr][ch][sample]))
+		is[gr][ch][sample] = float32(sign * math.Pow(math.Abs(float64(is[gr][ch][sample])), 4./3.) *
+			math.Pow(2, A/4.) * math.Pow(2, -B))
+
+	}
 }
 
-func decodeHuffmanB(r *BitReader) (v, w, x, y int) {
-	bitSample := r.ReadBits(24)
-	for _, k := range huffmanTableA {
-		hcod := k[0]
-		hlen := k[1]
+func reorder(gr, ch int, header Header, sideInfo SideInformation, is *[2][2][iblen]float32, count1 [2][2]int) {
+	samplesBuf := make([]float32, iblen)
+	band := bandIndex[header.Layer-1][1]
 
-		if hcod == bitSample>>(24-hlen) {
-			r.Seek(-(24 - hlen))
-
-			v = k[2] & 0x8
-			w = k[2] & 0x4
-			x = k[2] & 0x2
-			y = k[2] & 0x1
-
-			return v, w, x, y
+	// Only reorder short blocks
+	if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == blockShort {
+		sfb := 0
+		if sideInfo.MixedBlockFlag[gr][ch] != 0 {
+			sfb = 3
 		}
+
+		nextSfb := band[sfb+1] * 3
+		windowLen := band[sfb+1] - band[sfb]
+
+		i := 0
+		if sfb == 0 {
+			i = 0
+		}
+
+		for i < iblen {
+			if i == nextSfb {
+				j := band[sfb] * 3
+				copy(is[gr][ch][j:j+3*windowLen], samplesBuf[:3*windowLen])
+
+				if i >= count1[gr][ch] {
+					return
+				}
+
+				sfb++
+				nextSfb = band[sfb+1] * 3
+				windowLen = band[sfb+1] - band[sfb]
+			}
+			for window := 0; window < 3; window++ {
+				for j := 0; j < windowLen; j++ {
+					samplesBuf[j*3+window] = is[gr][ch][i]
+					i++
+				}
+			}
+		}
+		j := 3 * band[12]
+		copy(is[gr][ch][j:j+3*windowLen], samplesBuf[:3*windowLen])
 	}
-	r.Seek(-24)
-	return v, w, x, y
 }
