@@ -1,6 +1,10 @@
 package main
 
-var huffmanTable = [][][2]int{
+const (
+	maxTableEntry = 15 // Maximum Huffman table entry index
+)
+
+var huffmanCodes = [][][2]int{
 	// Table 0 Not used
 	// 1
 	{{0b1, 1}, {0b001, 3}},
@@ -207,55 +211,62 @@ var huffmanTable = [][][2]int{
 		{0b0000111, 7}, {0b0000110, 7}, {0b0000100, 7}, {0b00000111, 8}, {0b00000101, 8}, {0b00000011, 8}, {0b00000001, 8}, {0b0011, 4}},
 }
 
-var huffmanTableA = [16][6]int{
+var huffmanTableA = [16][3]int{
 	{0b1, 1, 0000}, {0b0101, 4, 0001}, {0b0100, 4, 0010}, {0b00101, 5, 0011},
 	{0b0110, 4, 0100}, {0b000101, 6, 0101}, {0b00100, 5, 0110}, {0b000100, 6, 0111},
 	{0b011, 4, 1000}, {0b00011, 5, 1001}, {0b00110, 5, 1010}, {0b000000, 6, 1011},
 	{0b00111, 5, 1100}, {0b000010, 6, 1101}, {0b000011, 6, 1110}, {0b000001, 6, 1111},
 }
 
-type table struct {
+var huffmanTableB = [16][3]int{
+	{0b1111, 4, 0000}, {0b1110, 4, 0001}, {0b1101, 4, 0010}, {0b1100, 4, 0011},
+	{0b1011, 4, 0100}, {0b1010, 4, 0101}, {0b1001, 4, 0110}, {0b1000, 4, 0111},
+	{0b0111, 4, 1000}, {0b0110, 4, 1001}, {0b0101, 4, 1010}, {0b0100, 4, 1011},
+	{0b0011, 4, 1100}, {0b0010, 4, 1101}, {0b0001, 4, 1110}, {0b0000, 4, 1111},
+}
+
+type huffmanTable struct {
 	Table   [][][2]int
 	Linbits int
 }
 
-var tables = [...]table{
+var huffmanTables = [...]huffmanTable{
 	{nil, 0},                    // Table 0 Not used
-	{huffmanTable[0:2], 0},      // Table 1
-	{huffmanTable[2:5], 0},      // Table 2
-	{huffmanTable[5:8], 0},      // Table 3
+	{huffmanCodes[0:2], 0},      // Table 1
+	{huffmanCodes[2:5], 0},      // Table 2
+	{huffmanCodes[5:8], 0},      // Table 3
 	{nil, 0},                    // Table 4 Not used
-	{huffmanTable[8:12], 0},     // Table 5
-	{huffmanTable[12:16], 0},    // Table 6
-	{huffmanTable[16:22], 0},    // Table 7
-	{huffmanTable[22:28], 0},    // Table 8
-	{huffmanTable[28:34], 0},    // Table 9
-	{huffmanTable[34:42], 0},    // Table 10
-	{huffmanTable[42:50], 0},    // Table 11
-	{huffmanTable[50:58], 0},    // Table 12
-	{huffmanTable[58:74], 0},    // Table 13
+	{huffmanCodes[8:12], 0},     // Table 5
+	{huffmanCodes[12:16], 0},    // Table 6
+	{huffmanCodes[16:22], 0},    // Table 7
+	{huffmanCodes[22:28], 0},    // Table 8
+	{huffmanCodes[28:34], 0},    // Table 9
+	{huffmanCodes[34:42], 0},    // Table 10
+	{huffmanCodes[42:50], 0},    // Table 11
+	{huffmanCodes[50:58], 0},    // Table 12
+	{huffmanCodes[58:74], 0},    // Table 13
 	{nil, 0},                    // Table 14 Not used
-	{huffmanTable[74:90], 0},    // Table 15
-	{huffmanTable[90:106], 1},   // Table 16
-	{huffmanTable[90:106], 2},   // Table 17
-	{huffmanTable[90:106], 3},   // Table 18
-	{huffmanTable[90:106], 4},   // Table 19
-	{huffmanTable[90:106], 6},   // Table 20
-	{huffmanTable[90:106], 8},   // Table 21
-	{huffmanTable[90:106], 10},  // Table 22
-	{huffmanTable[90:106], 13},  // Table 23
-	{huffmanTable[106:122], 4},  // Table 24
-	{huffmanTable[106:122], 5},  // Table 25
-	{huffmanTable[106:122], 6},  // Table 26
-	{huffmanTable[106:122], 7},  // Table 27
-	{huffmanTable[106:122], 8},  // Table 28
-	{huffmanTable[106:122], 9},  // Table 29
-	{huffmanTable[106:122], 11}, // Table 30
-	{huffmanTable[106:122], 13}, // Table 31
+	{huffmanCodes[74:90], 0},    // Table 15
+	{huffmanCodes[90:106], 1},   // Table 16
+	{huffmanCodes[90:106], 2},   // Table 17
+	{huffmanCodes[90:106], 3},   // Table 18
+	{huffmanCodes[90:106], 4},   // Table 19
+	{huffmanCodes[90:106], 6},   // Table 20
+	{huffmanCodes[90:106], 8},   // Table 21
+	{huffmanCodes[90:106], 10},  // Table 22
+	{huffmanCodes[90:106], 13},  // Table 23
+	{huffmanCodes[106:122], 4},  // Table 24
+	{huffmanCodes[106:122], 5},  // Table 25
+	{huffmanCodes[106:122], 6},  // Table 26
+	{huffmanCodes[106:122], 7},  // Table 27
+	{huffmanCodes[106:122], 8},  // Table 28
+	{huffmanCodes[106:122], 9},  // Table 29
+	{huffmanCodes[106:122], 11}, // Table 30
+	{huffmanCodes[106:122], 13}, // Table 31
 }
 
 func decodeHuffman(r *BitReader, tableNumber int) (x, y, v, w int) {
-	table := tables[tableNumber]
+	table := huffmanTables[tableNumber]
 
 	bitSample := r.ReadBits(24)
 	for x, v := range table.Table {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"math"
@@ -10,7 +9,7 @@ import (
 
 type Header struct {
 	SyncWord          uint16 // 12 bits
-	Id                byte   // 1 bit
+	ID                byte   // 1 bit
 	Layer             byte   // 2 bits
 	ProtectionBit     byte   // 1 bit
 	BitrateIndex      byte   // 4 bits
@@ -25,41 +24,47 @@ type Header struct {
 }
 
 const (
+	// Header.SyncWord
 	syncWord = 0xFFF
 
-	// ID
-	MPEG1 = 0x1
-	MPEG2 = 0x0
+	// Header.ID
+	MPEG1 = 0b1
+	MPEG2 = 0b0
 
-	// Layer
-	layer1        = 0x3
-	layer2        = 0x2
-	layer3        = 0x1
-	layerReserved = 0x0
+	// Header.Layer
+	layer1        = 0b11
+	layer2        = 0b10
+	layer3        = 0b01
+	layerReserved = 0b00
 
-	protected = 0x0
+	// Header.ProtectionBit
+	protected = 0b0
 
-	// Mode specified
-	modeStereo        = 0x0
-	modeJoinStereo    = 0x1
-	modeDualChannel   = 0x2
-	modeSingleChannel = 0x3
+	// Header.Mode specified
+	modeStereo        = 0b00
+	modeJoinStereo    = 0b01 // intensity_stereo and/or ms_stereo
+	modeDualChannel   = 0b10
+	modeSingleChannel = 0b11
+
+	// Header.ModeExtension specifies
+	intensityStereo = 0b01
+	msStereo        = 0b10
 )
 
 var bitrateSpecified = [3][16]int{
 	// Layer 3
 	{0, 32000, 40000, 48000, 56000, 64000, 80000, 96000,
-		112000, 128000, 160000, 192000, 224000, 256000, 320000}, // kBit/s
+		112000, 128000, 160000, 192000, 224000, 256000, 320000, 0}, // Bit/s
 	// Layer 2
 	{0, 32000, 48000, 56000, 64000, 80000, 96000, 112000,
-		128000, 160000, 192000, 224000, 256000, 320000, 384000}, // kBit/s
+		128000, 160000, 192000, 224000, 256000, 320000, 384000, 0}, // Bit/s
 	// Layer 1
 	{0, 32000, 64000, 96000, 128000, 160000, 192000, 224000,
-		256000, 288000, 320000, 352000, 384000, 416000, 448000}, // kBit/s
+		256000, 288000, 320000, 352000, 384000, 416000, 448000, 0}, // Bit/s
 }
 
 var frequencySpecified = [4]int{
-	44100, 48000, 32000, 0, // kHz
+	44100, 48000, 32000, 0, // Hz
 }
 
 type SideInformation struct {
@@ -83,14 +88,17 @@ type SideInformation struct {
 }
 
 const (
-	blockReserved = 0x0 // Reserved block
-	blockStart    = 0x1 // Start block
-	blockShort    = 0x2 // 3 short block
-	blockEnd      = 0x3 // End block
+	// SideInformation.BlockType
+	blockReserved = 0b00 // Reserved block
+	blockStart    = 0b01 // Start block
+	blockShort    = 0b10 // 3 short block
+	blockEnd      = 0b11 // End block
 
+	mixed = 0b1 // Mixed flag
+)
+
+const (
 	iblen = 576 // Frequency lines of each granule
-
-	maxTableEntry = 15 // Maximum Huffman table entry index
 )
 
 type Scalefac struct {
@@ -127,7 +135,7 @@ var pretab = [21]int{
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	content, err := ioutil.ReadFile("Lumen - Государство (1).mp3")
+	content, err := ioutil.ReadFile("file_example_MP3_700KB.mp3")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -162,7 +170,7 @@ func main() {
 		if header.SyncWord != syncWord {
 			break
 		}
-		fmt.Printf("%+v\n", header)
+		//fmt.Printf("%+v\n", header)
 
 		// Frame length ===============================================================================================
 		frameSize := 144 // byte for layer2 and layer3 1152/(1b*8bit) = 144; for layer1 384/(4b*8bit) = 12
@@ -172,7 +180,7 @@ func main() {
 		if header.PaddingBit == 1 {
 			frameLength += 1
 		}
-		fmt.Println(bitrate/1000, samplingFrequency, frameLength)
+		//fmt.Println(bitrate/1000, samplingFrequency, frameLength)
 
 		// CRC Check ===================================================================================================
 		if header.ProtectionBit == protected {
@@ -262,7 +270,7 @@ func main() {
 			}
 		}
 
-		fmt.Printf("%+v\n", sideInfo)
+		//fmt.Printf("%+v\n", sideInfo)
 
 		// Main Data ==================================================================================================
 		mainDataLength := frameLength - sideInformationLength - 4 // 4 bytes header
@@ -377,7 +385,7 @@ func main() {
 					region0 = bandIndex[header.Layer-1][0][sideInfo.Region0Count[gr][ch]+1]
 					region1 = bandIndex[header.Layer-1][0][sideInfo.Region0Count[gr][ch]+1+sideInfo.Region1Count[gr][ch]+1]
 				}
-				fmt.Printf("region0 %+v region1 %+v\n", region0, region1)
+				//fmt.Printf("region0 %+v region1 %+v\n", region0, region1)
 
 				sample := 0
 				for ; sample < int(sideInfo.BigValues[gr][ch])*2; sample += 2 {
@@ -442,11 +450,18 @@ func main() {
 				requantize(gr, ch, header, sideInfo, scalefac, &is)
 				reorder(gr, ch, header, sideInfo, &is, count1)
 			}
+			stereo(gr, header, &is)
+			for ch := 0; ch < nch; ch++ {
+				aliasReduction(gr, ch, sideInfo, &is)
+				imdct(gr, ch, sideInfo.BlockType[gr][ch], &is)
+				frequencyInversion()
+				synthFilterbank()
+			}
 		}
 
 		//fmt.Printf("%+v\n", scalefac)
 		//fmt.Printf("%+v\n", is)
-		fmt.Println("==================================================")
+		//fmt.Println("==================================================")
 	}
 }
 
@@ -474,7 +489,7 @@ func requantize(gr, ch int, header Header, sideInfo SideInformation, scalefac Sc
 				}
 			}
 
-			A = float64(sideInfo.GlobalGain[gr][ch] - 210.0 - 8.0*sideInfo.SubblockGain[gr][ch][window])
+			A = float64(sideInfo.GlobalGain[gr][ch] - 210 - 8*sideInfo.SubblockGain[gr][ch][window])
 			B = scalefacMultiplier * float64(scalefac.S[gr][ch][sfb][window])
 
 		} else { // Long blocks
@@ -482,7 +497,7 @@ func requantize(gr, ch int, header Header, sideInfo SideInformation, scalefac Sc
 				sfb++
 			}
 
-			A = float64(sideInfo.GlobalGain[gr][ch]) - 210.0
+			A = float64(sideInfo.GlobalGain[gr][ch]) - 210
 			B = scalefacMultiplier * float64(scalefac.L[gr][ch][sfb]+sideInfo.Preflag[gr][ch]*byte(pretab[sfb]))
 		}
 
@@ -535,4 +550,80 @@ func reorder(gr, ch int, header Header, sideInfo SideInformation, is *[2][2][ibl
 		j := 3 * band[12]
 		copy(is[gr][ch][j:j+3*windowLen], samplesBuf[:3*windowLen])
 	}
+}
+
+func stereo(gr int, header Header, is *[2][2][iblen]float32) {
+	if header.Mode == modeJoinStereo {
+		if header.ModeExtension&intensityStereo == intensityStereo {
+			// TODO
+		}
+		if header.ModeExtension&msStereo == msStereo {
+			for sample := 0; sample < iblen; sample++ {
+				mid := is[gr][0][sample]
+				side := is[gr][1][sample]
+				is[gr][0][sample] = (mid + side) / math.Sqrt2
+				is[gr][1][sample] = (mid - side) / math.Sqrt2
+			}
+		}
+	}
+}
+
+func aliasReduction(gr, ch int, sideInfo SideInformation, is *[2][2][iblen]float32) {
+	if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == blockShort && sideInfo.MixedBlockFlag[gr][ch] == 0 {
+		return
+	}
+
+	nsb := 32
+	if sideInfo.MixedBlockFlag[gr][ch] == 1 {
+		nsb = 2
+	}
+
+	for sb := 1; sb < nsb; sb++ {
+		for i := 0; i < 8; i++ {
+			//xar[18*sb-1-i] = xr[18*sb-1-i]Cs[i] - xr[18*sb+i]Ca[i]
+			//xar[18*sb+i] = xr[18*sb+i]Cs[i] + xr[18*sb-1-i]Ca[i]
+			li := 18*sb - 1 - i
+			ui := 18*sb + i
+			sample1 := is[gr][ch][li]
+			sample2 := is[gr][ch][ui]
+			is[gr][ch][li] = sample1*cs[i] - sample2*cs[i]
+			is[gr][ch][ui] = sample2*cs[i] + sample1*cs[i]
+		}
+	}
+}
+
+func imdct(gr, ch int, blockType byte, is *[2][2][iblen]float32) {
+	n := 36
+	if blockType == blockShort {
+		n = 12
+	}
+	halfN := n / 2
+	samplesBlock := make([]float32, 36)
+
+	nwin := 1
+	if blockType == blockShort {
+		nwin = 3
+	}
+
+	for block := 0; block < 32; block++ {
+		for window := 0; window < nwin; window++ {
+			for i := 0; i < n; i++ {
+				xi := float32(0.)
+				for k := 0; k < halfN; k++ {
+					s := is[gr][ch][block*18+halfN*window+k]
+					xi += s * float32(math.Cos(math.Pi/float64(2*n)*float64(2*i+1+halfN)*float64(2*k+1)))
+				}
+				samplesBlock[window*n+i] = xi * imdctWinData[blockType][i]
+			}
+		}
+		// TODO
+	}
+}
+
+func frequencyInversion() {
+
+}
+
+func synthFilterbank() {
+
 }
