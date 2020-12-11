@@ -49,12 +49,12 @@ func init() {
 	}
 }
 
-var n [64][32]float32
+var syncN [64][32]float32
 
 func init() {
 	for i := 0; i < 64; i++ {
 		for j := 0; j < 32; j++ {
-			n[i][j] = float32(math.Cos((16.0 + float64(i)) * (2.0*float64(j) + 1.0) * (math.Pi / 64.0)))
+			syncN[i][j] = float32(math.Cos((16.0 + float64(i)) * (2.0*float64(j) + 1.0) * (math.Pi / 64.0)))
 		}
 	}
 }

@@ -439,14 +439,13 @@ func main() {
 		pcm := make([]byte, iblen*4*2) // iblen * nGranules * 4
 		for gr := 0; gr < 2; gr++ {
 			for ch := 0; ch < nch; ch++ {
-				requantize(gr, ch, header, sideInfo, scalefac, &is)
-				fmt.Println(is[gr][ch])
+				requantize(gr, ch, header, sideInfo, scalefac, &is, count1)
 				reorder(gr, ch, header, sideInfo, &is, count1)
 			}
 			stereo(gr, header, &is)
 			for ch := 0; ch < nch; ch++ {
 				aliasReduction(gr, ch, sideInfo, &is)
-				imdct(gr, ch, sideInfo.BlockType[gr][ch], &is, &prevSamples)
+				imdct(gr, ch, sideInfo, &is, &prevSamples)
 				frequencyInversion(gr, ch, &is)
 				synthFilterbank(gr, ch, &is, &vVec, pcm[iblen*gr*4:])
 			}
@@ -457,60 +456,145 @@ func main() {
 				fmt.Println(err)
 			}
 		}
-
-		fmt.Printf("%+v\n", scalefac)
-		//fmt.Printf("%+v\n", is)
-		fmt.Printf("%+v\n", pcm)
-		fmt.Println("==================================================")
 	}
 }
 
-func requantize(gr, ch int, header Header, sideInfo SideInformation, scalefac Scalefac, is *[2][2][iblen]float32) {
+func requantize(gr, ch int, header Header, sideInfo SideInformation, scalefac Scalefac, is *[2][2][iblen]float32, count1 [2][2]int) {
 	var (
 		A, B float64
 	)
-	sfb := 0
-	window := 0
+	//sfb := 0
+	//window := 0
 
 	scalefacMultiplier := 0.5
 	if sideInfo.ScalfacScale[gr][ch] == 1 {
 		scalefacMultiplier = 1.0
 	}
 
-	for sample, i := 0, 0; sample < iblen; sample, i = sample+1, i+1 {
-		if sideInfo.BlockType[gr][ch] == blockShort || sideInfo.MixedBlockFlag[gr][ch] == 1 && sfb >= 8 { // Short blocks
-			if i == bandIndex[header.SamplingFrequency][1][sfb] {
-				i = 0
-				if window == 2 {
-					window = 0
+	if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == blockShort { // Short blocks
+		if sideInfo.MixedBlockFlag[gr][ch] == 1 { // 2 long sb first
+			sfb := 0
+			nextSfb := bandIndex[header.SamplingFrequency][0][sfb+1]
+			for i := 0; i < 36; i++ {
+				if i == nextSfb {
 					sfb++
-				} else {
-					window++
+					nextSfb = bandIndex[header.SamplingFrequency][0][sfb+1]
+				}
+				A = float64(sideInfo.GlobalGain[gr][ch]) - 210
+				B = scalefacMultiplier * float64(int(scalefac.L[gr][ch][sfb])+int(sideInfo.Preflag[gr][ch])*pretab[sfb])
+
+				sign := math.Copysign(1, float64(is[gr][ch][i]))
+				is[gr][ch][i] = float32(sign * math.Pow(math.Abs(float64(is[gr][ch][i])), 4.0/3.0) *
+					math.Pow(2, A/4.0) * math.Pow(2, -B))
+			}
+			sfb = 3
+			nextSfb = bandIndex[header.SamplingFrequency][1][sfb+1] * 3
+			windowLen := bandIndex[header.SamplingFrequency][1][sfb+1] - bandIndex[header.SamplingFrequency][1][sfb]
+			for i := 36; i < count1[gr][ch]; {
+				if i == nextSfb {
+					sfb++
+					nextSfb = bandIndex[header.SamplingFrequency][1][sfb+1] * 3
+					windowLen = bandIndex[header.SamplingFrequency][1][sfb+1] - bandIndex[header.SamplingFrequency][1][sfb]
+				}
+				for window := 0; window < 3; window++ {
+					for j := 0; j < windowLen; j++ {
+
+						A = float64(sideInfo.GlobalGain[gr][ch]) - 210.0 - 8.0*float64(sideInfo.SubblockGain[gr][ch][window])
+						B = scalefacMultiplier * float64(scalefac.S[gr][ch][sfb][window])
+						C := A/4.0 + -B
+
+						sign := math.Copysign(1, float64(is[gr][ch][i]))
+						is[gr][ch][i] = float32(sign * math.Pow(math.Abs(float64(is[gr][ch][i])), 4.0/3.0) *
+							math.Pow(2, C))
+
+						i++
+					}
 				}
 			}
+		} else { // Only short blocks
+			sfb := 0
+			nextSfb := bandIndex[header.SamplingFrequency][1][sfb+1] * 3
+			windowLen := bandIndex[header.SamplingFrequency][1][sfb+1] - bandIndex[header.SamplingFrequency][1][sfb]
+			for i := 0; i < count1[gr][ch]; {
+				if i == nextSfb {
+					sfb++
+					nextSfb = bandIndex[header.SamplingFrequency][1][sfb+1] * 3
+					windowLen = bandIndex[header.SamplingFrequency][1][sfb+1] - bandIndex[header.SamplingFrequency][1][sfb]
+				}
+				for window := 0; window < 3; window++ {
+					for j := 0; j < windowLen; j++ {
+						A = float64(sideInfo.GlobalGain[gr][ch]) - 210.0 - 8.0*float64(sideInfo.SubblockGain[gr][ch][window])
+						B = scalefacMultiplier * float64(scalefac.S[gr][ch][sfb][window])
+						C := A/4.0 + -B
 
-			A = float64(sideInfo.GlobalGain[gr][ch]) - 210.0 - 8.0*float64(sideInfo.SubblockGain[gr][ch][window])
-			B = scalefacMultiplier * float64(scalefac.S[gr][ch][sfb][window])
-
-		} else { // Long blocks
-			if sample == bandIndex[header.SamplingFrequency][0][sfb+1] {
-				sfb++
+						sign := math.Copysign(1, float64(is[gr][ch][i]))
+						is[gr][ch][i] = float32(sign * math.Pow(math.Abs(float64(is[gr][ch][i])), 4.0/3.0) *
+							math.Pow(2, C))
+						i++
+					}
+				}
 			}
-
-			A = float64(sideInfo.GlobalGain[gr][ch]) - 210.0
-			B = scalefacMultiplier * float64(scalefac.L[gr][ch][sfb]+sideInfo.Preflag[gr][ch]*byte(pretab[sfb]))
 		}
+	} else { // Only long blocks
+		sfb := 0
+		nextSfb := bandIndex[header.SamplingFrequency][0][sfb+1]
+		for i := 0; i < count1[gr][ch]; i++ {
+			if i == nextSfb {
+				sfb++
+				nextSfb = bandIndex[header.SamplingFrequency][0][sfb+1]
+			}
+			A = float64(sideInfo.GlobalGain[gr][ch]) - 210
+			B = scalefacMultiplier * float64(int(scalefac.L[gr][ch][sfb])+int(sideInfo.Preflag[gr][ch])*pretab[sfb])
 
-		sign := math.Copysign(1, float64(is[gr][ch][sample]))
-		is[gr][ch][sample] = float32(sign * math.Pow(math.Abs(float64(is[gr][ch][sample])), 4.0/3.0) *
-			math.Pow(2, A/4.0) * math.Pow(2, -B))
-
+			sign := math.Copysign(1, float64(is[gr][ch][i]))
+			is[gr][ch][i] = float32(sign * math.Pow(math.Abs(float64(is[gr][ch][i])), 4.0/3.0) *
+				math.Pow(2, A/4.0) * math.Pow(2, -B))
+		}
 	}
+
+	//for sample, i := 0, 0; sample < iblen; sample, i = sample+1, i+1 {
+	//	if sideInfo.BlockType[gr][ch] == blockShort || sideInfo.MixedBlockFlag[gr][ch] == 1 && sfb >= 8 { // Short blocks
+	//		if i == bandIndex[header.SamplingFrequency][1][sfb] {
+	//			i = 0
+	//			if window == 2 {
+	//				window = 0
+	//				sfb++
+	//			} else {
+	//				window++
+	//			}
+	//		}
+	//
+	//		A = float64(sideInfo.GlobalGain[gr][ch]) - 210.0 - 8.0*float64(sideInfo.SubblockGain[gr][ch][window])
+	//		B = scalefacMultiplier * float64(scalefac.S[gr][ch][sfb][window])
+	//		fmt.Println(gr, ch, sfb, window, scalefacMultiplier)
+	//		fmt.Printf("sideInfo.GlobalGain[gr][ch] = %d\syncN", sideInfo.GlobalGain[gr][ch])
+	//		fmt.Printf("sideInfo.SubblockGain[gr][ch][window] = %d\syncN", sideInfo.SubblockGain[gr][ch][window])
+	//		fmt.Printf("scalefac.S = %d\syncN", scalefac.S[gr][ch][sfb][window])
+	//		fmt.Printf("A = %f| B = %f| %f\syncN", A, B, A/4.0 + -B)
+	//		fmt.Println(gCount, "====================")
+	//		gCount++
+	//
+	//	} else { // Long blocks
+	//		if sample == bandIndex[header.SamplingFrequency][0][sfb+1] {
+	//			sfb++
+	//		}
+	//
+	//		A = float64(sideInfo.GlobalGain[gr][ch]) - 210.0
+	//		B = scalefacMultiplier * float64(scalefac.L[gr][ch][sfb]+sideInfo.Preflag[gr][ch]*byte(pretab[sfb]))
+	//	}
+	//
+	//	sign := math.Copysign(1, float64(is[gr][ch][sample]))
+	//	C := A/4.0 + -B
+	//	//fmt.Println(C)
+	//	is[gr][ch][sample] = float32(sign * math.Pow(math.Abs(float64(is[gr][ch][sample])), 4.0/3.0) *
+	//		math.Pow(2, C))
+	//
+	//}
 }
 
 func reorder(gr, ch int, header Header, sideInfo SideInformation, is *[2][2][iblen]float32, count1 [2][2]int) {
 	samplesBuf := make([]float32, iblen)
-	band := bandIndex[header.Layer-1][1]
+	shortBand := bandIndex[header.SamplingFrequency][1]
 
 	// Only reorder short blocks
 	if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == blockShort {
@@ -519,26 +603,26 @@ func reorder(gr, ch int, header Header, sideInfo SideInformation, is *[2][2][ibl
 			sfb = 3
 		}
 
-		nextSfb := band[sfb+1] * 3
-		windowLen := band[sfb+1] - band[sfb]
+		nextSfb := shortBand[sfb+1] * 3
+		windowLen := shortBand[sfb+1] - shortBand[sfb]
 
-		i := 0
+		i := 36
 		if sfb == 0 {
 			i = 0
 		}
 
 		for i < iblen {
 			if i == nextSfb {
-				j := band[sfb] * 3
-				copy(is[gr][ch][j:j+3*windowLen], samplesBuf[:3*windowLen])
+				j := shortBand[sfb] * 3
+				copy(is[gr][ch][j:j+3*windowLen], samplesBuf[0:3*windowLen])
 
 				if i >= count1[gr][ch] {
 					return
 				}
 
 				sfb++
-				nextSfb = band[sfb+1] * 3
-				windowLen = band[sfb+1] - band[sfb]
+				nextSfb = shortBand[sfb+1] * 3
+				windowLen = shortBand[sfb+1] - shortBand[sfb]
 			}
 			for window := 0; window < 3; window++ {
 				for j := 0; j < windowLen; j++ {
@@ -547,8 +631,8 @@ func reorder(gr, ch int, header Header, sideInfo SideInformation, is *[2][2][ibl
 				}
 			}
 		}
-		j := 3 * band[12]
-		copy(is[gr][ch][j:j+3*windowLen], samplesBuf[:3*windowLen])
+		j := 3 * shortBand[12]
+		copy(is[gr][ch][j:j+3*windowLen], samplesBuf[0:3*windowLen])
 	}
 }
 
@@ -592,52 +676,42 @@ func aliasReduction(gr, ch int, sideInfo SideInformation, is *[2][2][iblen]float
 	}
 }
 
-func imdct(gr, ch int, blockType byte, is *[2][2][iblen]float32, prevSamples *[2][32][18]float32) {
+func imdct(gr, ch int, sideInfo SideInformation, is *[2][2][iblen]float32, prevSamples *[2][32][18]float32) {
+	blockType := sideInfo.BlockType[gr][ch]
+
 	n := 36
 	if blockType == blockShort {
 		n = 12
 	}
 	halfN := n / 2
-	samplesBlock := make([]float32, 36)
 
-	nwin := 1
+	nWin := 1
 	if blockType == blockShort {
-		nwin = 3
+		nWin = 3
 	}
 
 	for block := 0; block < 32; block++ {
-		for window := 0; window < nwin; window++ {
+		samplesBlock := make([]float32, 36)
+		if blockType == blockShort {
+			for window := 0; window < nWin; window++ {
+				for i := 0; i < n; i++ {
+					xi := float32(0.0)
+					for k := 0; k < halfN; k++ {
+						s := is[gr][ch][block*18+window+nWin*k]
+						xi += s * float32(math.Cos(math.Pi/float64(2*n)*float64(2*i+1+halfN)*float64(2*k+1)))
+					}
+					samplesBlock[6*window+i+6] += xi * imdctWinData[blockType][i]
+				}
+			}
+		} else {
+			// nWin = 1
 			for i := 0; i < n; i++ {
-				xi := float32(0.)
+				xi := float32(0.0)
 				for k := 0; k < halfN; k++ {
-					s := is[gr][ch][block*18+halfN*window+k]
+					s := is[gr][ch][block*18+k]
 					xi += s * float32(math.Cos(math.Pi/float64(2*n)*float64(2*i+1+halfN)*float64(2*k+1)))
 				}
-				samplesBlock[window*n+i] = xi * imdctWinData[blockType][i]
-			}
-		}
-
-		if blockType == blockShort {
-			tempBlock := make([]float32, 36)
-			copy(tempBlock, samplesBlock)
-
-			for i := 0; i < 6; i++ {
-				samplesBlock[i] = 0
-			}
-			for i := 6; i < 12; i++ {
-				samplesBlock[i] = tempBlock[i-6]
-			}
-			for i := 12; i < 18; i++ {
-				samplesBlock[i] = tempBlock[i-6] + tempBlock[i-12]
-			}
-			for i := 18; i < 24; i++ {
-				samplesBlock[i] = tempBlock[i-12] + tempBlock[i-18]
-			}
-			for i := 24; i < 30; i++ {
-				samplesBlock[i] = tempBlock[i-18]
-			}
-			for i := 30; i < 36; i++ {
-				samplesBlock[i] = 0
+				samplesBlock[i] = xi * imdctWinData[blockType][i]
 			}
 		}
 
@@ -652,7 +726,6 @@ func imdct(gr, ch int, blockType byte, is *[2][2][iblen]float32, prevSamples *[2
 func frequencyInversion(gr, ch int, is *[2][2][iblen]float32) {
 	for sb := 1; sb < 32; sb += 2 {
 		for i := 1; i < 18; i += 2 {
-			//is[gr][ch][i*18+sb] *= -1 // TODO Почему
 			is[gr][ch][sb*18+i] *= -1
 		}
 	}
@@ -677,7 +750,7 @@ func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float3
 		for i := 0; i < 64; i++ {
 			vVec[ch][i] = 0.0
 			for j := 0; j < 32; j++ {
-				vVec[ch][i] += tempVec[j] * n[i][j]
+				vVec[ch][i] += tempVec[j] * syncN[i][j]
 			}
 		}
 
