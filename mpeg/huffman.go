@@ -1,8 +1,8 @@
-package main
+package mpeg
 
-const (
-	maxTableEntry = 15 // Maximum Huffman table entry index
-)
+import "awCodec/utils"
+
+const maxTableEntry = 15 // Maximum Huffman table entry index
 
 var huffmanTableA = [16][3]int{
 	{0b1, 1, 0b0000}, {0b0101, 4, 0b0001}, {0b0100, 4, 0b0010}, {0b00101, 5, 0b0011},
@@ -265,7 +265,7 @@ var huffmanTables = [...]huffmanTable{
 	{huffmanCodes[106:122], 13}, // Table 31
 }
 
-func decodeHuffman(r *BitReader, tableNumber int) (x, y int) {
+func decodeHuffman(r *utils.BitReader, tableNumber int) (x, y int) {
 	table := huffmanTables[tableNumber]
 
 	bitSample := r.ReadBits(24)
@@ -299,7 +299,7 @@ func decodeHuffman(r *BitReader, tableNumber int) (x, y int) {
 	return 0, 0
 }
 
-func decodeHuffmanA(r *BitReader) (v, w, x, y int) {
+func decodeHuffmanA(r *utils.BitReader) (v, w, x, y int) {
 	bitSample := r.ReadBits(24)
 	for _, k := range huffmanTableA {
 		hcod := k[0]
@@ -332,7 +332,7 @@ func decodeHuffmanA(r *BitReader) (v, w, x, y int) {
 	return 0, 0, 0, 0
 }
 
-func decodeHuffmanB(r *BitReader) (v, w, x, y int) {
+func decodeHuffmanB(r *utils.BitReader) (v, w, x, y int) {
 	bitSample := r.ReadBits(4)
 
 	for _, k := range huffmanTableB {

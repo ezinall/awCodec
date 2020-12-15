@@ -1,4 +1,4 @@
-package main
+package utils
 
 import (
 	"io"
@@ -81,7 +81,7 @@ func (bitReader *PlainBitReader) MustReadBits(bits int64) uint64 {
 type BitReader struct {
 	offset  int
 	bytes   []byte
-	counter int
+	Counter int
 }
 
 func NewBitReader(b []byte) *BitReader {
@@ -99,11 +99,11 @@ func (bitReader *BitReader) ReadBits(n int) int {
 	r = r >> (32 - (n + bitReader.offset%8)) & (0xFFFFFFFF >> (32 - n))
 
 	bitReader.offset += n
-	bitReader.counter += n
+	bitReader.Counter += n
 	return int(r)
 }
 
 func (bitReader *BitReader) Seek(n int) {
 	bitReader.offset += n
-	bitReader.counter += n
+	bitReader.Counter += n
 }
