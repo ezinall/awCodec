@@ -10,45 +10,47 @@ import (
 	"unsafe"
 )
 
+var formatAvi = [4]byte{'A', 'V', 'I', ' '}
+
 const (
 	// avih dwFlags
-	AVIF_HASINDEX       = 0x00000010
-	AVIF_MUSTUSEINDEX   = 0x00000020
-	AVIF_ISINTERLEAVED  = 0x00000100
-	AVIF_WASCAPTUREFILE = 0x00010000
-	AVIF_COPYRIGHTED    = 0x00020000
-	AVIF_TRUSTCKTYPE    = 0x00000800
+	AvifHasindex       = 0x00000010
+	AvifMustuseindex   = 0x00000020
+	AvifIsinterleaved  = 0x00000100
+	AvifWascapturefile = 0x00010000
+	AvifCopyrighted    = 0x00020000
+	AvifTrustcktype    = 0x00000800
 
 	// strh dwFlags
-	AVISF_DISABLED         = 0x00000001
-	AVISF_VIDEO_PALCHANGES = 0x00010000
+	AvisfDisabled        = 0x00000001
+	AvisfVideoPalchanges = 0x00010000
 
 	// bIndexType
-	AVI_INDEX_OF_INDEXES = 0x00
-	AVI_INDEX_OF_CHUNKS  = 0x01
-	AVI_INDEX_IS_DATA    = 0x80
+	AviIndexOfIndexes = 0x00
+	AviIndexOfChunks  = 0x01
+	AviIndexIsData    = 0x80
 
 	// bIndexSubtype
-	AVI_INDEX_2FIELD = 0x01
+	AviIndex2field = 0x01
 
 	// idx1 chunk dwFlags
-	AVIIF_LIST      = 0x00000001
-	AVIIF_KEYFRAME  = 0x00000010
-	AVIIF_FIRSTPART = 0x00000020
-	AVIIF_LASTPART  = 0x00000040
-	AVIIF_NOTIME    = 0x00000100
+	AviifList      = 0x00000001
+	AviifKeyframe  = 0x00000010
+	AviifFirstpart = 0x00000020
+	AviifLastpart  = 0x00000040
+	AviifNotime    = 0x00000100
 )
-
-type Chunk struct {
-	DwFourCC [4]byte
-	DwSize   uint32
-	Data     []byte
-}
 
 type List struct {
 	DwList   [4]byte
 	DwSize   uint32
 	DwFourCC [4]byte
+	Data     []byte
+}
+
+type Chunk struct {
+	DwFourCC [4]byte
+	DwSize   uint32
 	Data     []byte
 }
 
@@ -133,7 +135,7 @@ func Avi(path string) {
 	copy(AVI.DwFourCC[:], content[8:12])
 	AVI.Data = content[12:]
 
-	if string(AVI.DwFourCC[:]) != "AVI " {
+	if AVI.DwFourCC != formatAvi {
 		return
 	}
 

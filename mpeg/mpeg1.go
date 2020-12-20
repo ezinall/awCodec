@@ -2,6 +2,7 @@ package mpeg
 
 import (
 	"awCodec/id3"
+	"awCodec/pcm"
 	"awCodec/utils"
 	"bytes"
 	"math"
@@ -111,15 +112,15 @@ var scalefacCompress = [16][2]int{
 }
 
 var bandIndex = [3][2][]int{
-	{ // Layer 3
+	{
 		{0, 4, 8, 12, 16, 20, 24, 30, 36, 44, 52, 62, 74, 90, 110, 134, 162, 196, 238, 288, 342, 418, 576},
 		{0, 4, 8, 12, 16, 22, 30, 40, 52, 66, 84, 106, 136, 192},
 	},
-	{ // Layer 2
+	{
 		{0, 4, 8, 12, 16, 20, 24, 30, 36, 42, 50, 60, 72, 88, 106, 128, 156, 190, 230, 276, 330, 384, 576},
 		{0, 4, 8, 12, 16, 22, 28, 38, 50, 64, 80, 100, 126, 192},
 	},
-	{ // Layer 1
+	{
 		{0, 4, 8, 12, 16, 20, 24, 30, 36, 44, 54, 66, 82, 102, 126, 156, 194, 240, 296, 364, 448, 550, 576},
 		{0, 4, 8, 12, 16, 22, 30, 42, 58, 78, 104, 138, 180, 192},
 	},
@@ -131,14 +132,9 @@ var pretab = [22]int{
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 2, 0,
 }
 
-type outData struct {
-	Pcm        []int16
-	SampleRate int
-}
-
 // Decode MPEG1/MPEG2 format.
-func mpeg(file *bytes.Reader) (*outData, error) {
-	var out = outData{}
+func mpeg(file *bytes.Reader) (*pcm.F32LE, error) {
+	var out = &pcm.F32LE{}
 
 	id3.ReadID3(file)
 
@@ -172,9 +168,6 @@ func mpeg(file *bytes.Reader) (*outData, error) {
 			break
 		}
 		//fmt.Printf("%+v\n", header)
-		if out.SampleRate == 0 {
-			out.SampleRate = 44100
-		}
 
 		// Frame length ===============================================================================================
 		frameSize := 144 // byte for layer2 and layer3 1152/(1b*8bit) = 144; for layer1 384/(4b*8bit) = 12
@@ -186,6 +179,10 @@ func mpeg(file *bytes.Reader) (*outData, error) {
 		}
 		//fmt.Println(bitrate/1000, samplingFrequency, frameLength)
 
+		if out.Context().SampleRate == 0 {
+			out.Context().SampleRate = samplingFrequency
+		}
+
 		// CRC Check ===================================================================================================
 		if header.ProtectionBit == protected {
 			crc := make([]byte, 2)
@@ -196,6 +193,10 @@ func mpeg(file *bytes.Reader) (*outData, error) {
 		nch := 2 // Number of channels; equals 1 for single_channel mode, equals 2 for other modes.
 		if header.Mode == modeSingleChannel {
 			nch = 1
+		}
+
+		if out.Context().Channels == 0 {
+			out.Context().Channels = nch
 		}
 
 		// Side Information ==========================================================================================
@@ -434,7 +435,7 @@ func mpeg(file *bytes.Reader) (*outData, error) {
 		}
 
 		// ??? ================================================================================================
-		pcm := make([]int16, iblen*2*2) // iblen * number granules * byte count per sample
+		pcm := make([]float32, iblen*2*2) // iblen * number granules * byte count per sample
 		for gr := 0; gr < 2; gr++ {
 			for ch := 0; ch < nch; ch++ {
 				requantize(gr, ch, header, sideInfo, scalefac, &is, countValues)
@@ -448,10 +449,11 @@ func mpeg(file *bytes.Reader) (*outData, error) {
 				synthFilterbank(gr, ch, &is, &vVec, pcm[iblen*gr*2:])
 			}
 		}
-		out.Pcm = append(out.Pcm, pcm...)
+		//out.SetPcm(append(out.Pcm(), pcm...))
+		out.Append(pcm)
 	}
 
-	return &out, nil
+	return out, nil
 }
 
 func requantize(gr, ch int, header Header, sideInfo sideInformation, scalefac Scalefac, is *[2][2][iblen]float32, countValues [2][2]int) {
@@ -712,7 +714,7 @@ func frequencyInversion(gr, ch int, is *[2][2][iblen]float32) {
 	}
 }
 
-func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float32, pcm []int16) {
+func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float32, pcm []float32) {
 	uVec := [512]float32{}
 	wVec := [512]float32{}
 	//pcm := [iblen]float32{}
@@ -754,19 +756,19 @@ func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float3
 			for j := 0; j < 512; j += 32 {
 				S += wVec[j+i]
 			}
-			sample := int(S * math.MaxInt16)
-			if sample > math.MaxInt16 {
-				sample = math.MaxInt16
-			} else if sample < -math.MaxInt16 {
-				sample = -math.MaxInt16
-			}
+			//sample := int(S * math.MaxInt16)
+			//if sample > math.MaxInt16 {
+			//	sample = math.MaxInt16
+			//} else if sample < -math.MaxInt16 {
+			//	sample = -math.MaxInt16
+			//}
 
-			s := int16(sample)
+			//s := int16(sample)
 			idx := 2 * (32*sb + i)
 			if ch == 0 {
-				pcm[idx] = s
+				pcm[idx] = S
 			} else {
-				pcm[idx+1] = s
+				pcm[idx+1] = S
 			}
 		}
 	}
