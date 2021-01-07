@@ -5,28 +5,38 @@ import (
 	"time"
 )
 
+// Context contains information about the audio stream.
 type Context struct {
-	SampleRate int // sampling frequency
-	Channels   int // numbers of channels
+	SampleRate int // Sampling frequency defines how many times per second a sound is sampled.
+	Channels   int // Numbers of channels.
+}
+
+// Copy Context.
+func (c *Context) Copy(src Context) {
+	*c = src
 }
 
 // Samples ...
-//
-// Len return pcm total count.
 type Samples interface {
+	// Pcm ...
 	Pcm() interface{}
+
+	// Len returns pcm total count samples.
 	Len() int
+
+	// BitPerSample returns counts bits per one sample.
 	BitPerSample() int
 
+	// Context returns pointer to stream context.
 	Context() *Context
 
+	// Duration represents the total time in seconds as time.Duration.
 	Duration() time.Duration
 }
 
 func ToS16LE(s Samples) *S16LE {
 	s16le := &S16LE{}
-	s16le.Context().SampleRate = s.Context().SampleRate
-	s16le.Context().Channels = s.Context().Channels
+	s16le.Context().Copy(*s.Context())
 
 	switch t := s.Pcm().(type) {
 	case []float32:

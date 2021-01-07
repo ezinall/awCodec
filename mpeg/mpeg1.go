@@ -435,7 +435,7 @@ func mpeg(file *bytes.Reader) (*pcm.F32LE, error) {
 		}
 
 		// ??? ================================================================================================
-		pcm := make([]float32, iblen*2*2) // iblen * number granules * byte count per sample
+		samples := make([]float32, iblen*2*2) // iblen * number granules * byte count per sample
 		for gr := 0; gr < 2; gr++ {
 			for ch := 0; ch < nch; ch++ {
 				requantize(gr, ch, header, sideInfo, scalefac, &is, countValues)
@@ -446,11 +446,10 @@ func mpeg(file *bytes.Reader) (*pcm.F32LE, error) {
 				aliasReduction(gr, ch, sideInfo, &is)
 				imdct(gr, ch, sideInfo.BlockType[gr][ch], &is, &prevSamples)
 				frequencyInversion(gr, ch, &is)
-				synthFilterbank(gr, ch, &is, &vVec, pcm[iblen*gr*2:])
+				synthFilterbank(gr, ch, &is, &vVec, samples[iblen*gr*2:])
 			}
 		}
-		//out.SetPcm(append(out.Pcm(), pcm...))
-		out.Append(pcm)
+		out.Append(samples)
 	}
 
 	return out, nil

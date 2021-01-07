@@ -1,9 +1,7 @@
 package main
 
 import (
-	"awCodec/g711"
 	"awCodec/mpeg"
-	"awCodec/pcm"
 	"awCodec/riff"
 	"bytes"
 	"fmt"
@@ -23,10 +21,10 @@ func main() {
 
 	fmt.Println(out.Duration())
 
-	out2 := pcm.ToS16LE(out)
-	out3 := g711.ToMuLaw(out2)
+	//out2 := pcm.ToS16LE(out)
+	//out3 := g711.ToMuLaw(out2)
 
-	//riff.EncodeWav(out, riff.WaveFormatIeeeFloat)
+	riff.EncodeWav(out, riff.WaveFormatIeeeFloat)
 	//riff.EncodeWav(out2, riff.WaveFormatPcm)
-	riff.EncodeWav(out3, riff.WaveFormatMulaw)
+	//riff.EncodeWav(out3, riff.WaveFormatMulaw)
 }

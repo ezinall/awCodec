@@ -20,7 +20,6 @@ func (f32le *F32LE) Pcm() interface{} {
 	return f32le.pcm
 }
 
-// Len return total samples count.
 func (f32le *F32LE) Len() int {
 	return len(f32le.pcm)
 }
