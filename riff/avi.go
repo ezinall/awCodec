@@ -10,8 +10,6 @@ import (
 	"unsafe"
 )
 
-var formatAvi = [4]byte{'A', 'V', 'I', ' '}
-
 const (
 	// avih dwFlags
 	AvifHasindex       = 0x00000010
@@ -108,14 +106,6 @@ type BitMapInfoHeader struct {
 	BiClrImportant  uint32
 }
 
-type WaveFormat struct {
-	WFormatTag      uint16
-	NChannels       uint16
-	NSamplesPerSec  uint32
-	NAvgBytesPerSec uint32
-	NBlockAlign     uint16
-}
-
 type AVIIndexEntry struct {
 	Ckid          [4]byte
 	DwFlags       uint32
@@ -123,7 +113,7 @@ type AVIIndexEntry struct {
 	DwChunkLength uint32
 }
 
-func Avi(path string) {
+func DecodeAvi(path string) {
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
 		log.Fatal(err)

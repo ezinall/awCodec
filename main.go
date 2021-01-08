@@ -24,7 +24,7 @@ func main() {
 	//out2 := pcm.ToS16LE(out)
 	//out3 := g711.ToMuLaw(out2)
 
-	riff.EncodeWav(out, riff.WaveFormatIeeeFloat)
-	//riff.EncodeWav(out2, riff.WaveFormatPcm)
-	//riff.EncodeWav(out3, riff.WaveFormatMulaw)
+	riff.EncodeWave(out, riff.WaveFormatIeeeFloat)
+	//riff.EncodeWave(out2, riff.WaveFormatPcm)
+	//riff.EncodeWave(out3, riff.WaveFormatMulaw)
 }
