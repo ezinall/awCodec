@@ -113,6 +113,7 @@ type AVIIndexEntry struct {
 	DwChunkLength uint32
 }
 
+// DecodeAvi ...
 func DecodeAvi(path string) {
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
@@ -151,19 +152,20 @@ func DecodeAvi(path string) {
 	for index != len(AVI.Data) {
 		if dwList := AVI.Data[index : index+4]; string(dwList) == "LIST" {
 			dwSize := binary.LittleEndian.Uint32(AVI.Data[index+4 : index+8])
-			dwFourCC := AVI.Data[index+8 : index+12]
+			dwFourCC := [4]byte{}
+			copy(dwFourCC[:], AVI.Data[index+8:index+12])
 
-			if string(dwFourCC) == "hdrl" {
+			if dwFourCC == listHdrl { // hdrl
 				copy(hdrl.DwList[:], dwList)
 				hdrl.DwSize = dwSize
-				copy(hdrl.DwFourCC[:], dwFourCC)
+				hdrl.DwFourCC = dwFourCC
 				hdrl.Data = AVI.Data[index+12 : index+12+int(dwSize)-4]
-			} else if string(dwFourCC) == "movi" {
+			} else if dwFourCC == listMovi { // movi
 				copy(movi.DwList[:], dwList)
 				movi.DwSize = dwSize
-				copy(movi.DwFourCC[:], dwFourCC)
+				movi.DwFourCC = dwFourCC
 				movi.Data = AVI.Data[index+12 : index+12+int(dwSize)-4]
-			} else if string(dwFourCC) == "INFO" {
+			} else if dwFourCC == listInfo { // INFO
 				// past to info
 			}
 
@@ -219,8 +221,8 @@ func DecodeAvi(path string) {
 		}
 
 		index := 8 + int(dwSize)
-		switch string(strh.FccType[:]) {
-		case "vids":
+		switch strh.FccType {
+		case [4]byte{'v', 'i', 'd', 's'}:
 			dwSize := binary.LittleEndian.Uint32(list.Data[index+4 : index+8])
 
 			strf := BitMapInfoHeader{}
@@ -233,7 +235,7 @@ func DecodeAvi(path string) {
 				strh AVIStreamHeader
 				strf BitMapInfoHeader
 			}{strh, strf})
-		case "auds":
+		case [4]byte{'a', 'u', 'd', 's'}:
 			dwSize := binary.LittleEndian.Uint32(list.Data[index+4 : index+8])
 
 			strf := WaveFormat{} //TODO реализовать смену структуры в зависимости от размера
@@ -246,9 +248,9 @@ func DecodeAvi(path string) {
 				strh AVIStreamHeader
 				strf WaveFormat
 			}{strh, strf})
-		case "txts":
+		case [4]byte{'t', 'x', 't', 's'}:
 			fmt.Printf("%+v\n", strh)
-		case "mids":
+		case [4]byte{'m', 'i', 'd', 's'}:
 		}
 	}
 

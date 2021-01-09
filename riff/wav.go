@@ -90,7 +90,7 @@ const (
 	WaveFormatSoftsound               uint16 = 0x0080             // Softsound, Ltd.
 	WaveFormatVoxwareTq60             uint16 = 0x0081             // Voxware Inc
 	WaveFormatMsrt24                  uint16 = 0x0082             // Microsoft Corporation
-	WaveFormatG729a                   uint16 = 0x0083             // AT&amp;T Labs, Inc.
+	WaveFormatG729a                   uint16 = 0x0083             // AT&T Labs, Inc.
 	WaveFormatMviMvi2                 uint16 = 0x0084             // Motion Pixels
 	WaveFormatDfG726                  uint16 = 0x0085             // DataFusion Systems (Pty) (Ltd)
 	WaveFormatDfGsm610                uint16 = 0x0086             // DataFusion Systems (Pty) (Ltd)
@@ -181,8 +181,8 @@ const (
 	WaveFormatQdesignMusic            uint16 = 0x0450             // QDesign Corporation
 	WaveFormatOn2Vp7Audio             uint16 = 0x0500             // On2 Technologies
 	WaveFormatOn2Vp6Audio             uint16 = 0x0501             // On2 Technologies
-	WaveFormatVmeVmpcm                uint16 = 0x0680             // AT&amp;T Labs, Inc.
-	WaveFormatTpc                     uint16 = 0x0681             // AT&amp;T Labs, Inc.
+	WaveFormatVmeVmpcm                uint16 = 0x0680             // AT&T Labs, Inc.
+	WaveFormatTpc                     uint16 = 0x0681             // AT&T Labs, Inc.
 	WaveFormatLightwaveLossless       uint16 = 0x08AE             // Clearjump
 	WaveFormatOligsm                  uint16 = 0x1000             // Ing C. Olivetti &amp; C., S.p.A.
 	WaveFormatOliadpcm                uint16 = 0x1001             // Ing C. Olivetti &amp; C., S.p.A.
@@ -242,7 +242,7 @@ const (
 	WaveFormatSymbolG729A             uint16 = 0xA103             // Symbol Technologies
 	WaveFormatVoiceageAmrWb           uint16 = 0xA104             // VoiceAge Corp.
 	WaveFormatIngenientG726           uint16 = 0xA105             // Ingenient Technologies, Inc.
-	WaveFormatMpeg4Aac                uint16 = 0xA106             // ISO/MPEG­4
+	WaveFormatMpeg4Aac                uint16 = 0xA106             // ISO/MPEG-4
 	WaveFormatEncoreG726              uint16 = 0xA107             // Encore Software
 	WaveFormatZollAsao                uint16 = 0xA108             // ZOLL Medical Corp.
 	WaveFormatSpeexVoice              uint16 = 0xA109             // xiph.org
@@ -278,7 +278,23 @@ const (
 	WaveFormatDevelopment             uint16 = 0xFFFF             // Development / Unregistered
 )
 
-func EncodeWave(samples pcm.Samples, waveFormat uint16) {
+// WaveFormat ...
+type WaveFormat struct {
+	WFormatTag      uint16 // Format type
+	NChannels       uint16 // Number of channels (i.e. mono, stereo...)
+	NSamplesPerSec  uint32 // Sample rate
+	NAvgBytesPerSec uint32 // For buffer estimation
+	NBlockAlign     uint16 // Block size of data
+}
+
+// PcmWaveFormat ...
+type PcmWaveFormat struct {
+	Wf             WaveFormat
+	WBitsPerSample uint16 // Number of bits per sample
+}
+
+// EncodeWave ...
+func EncodeWave(waveFormat uint16, samples pcm.Samples) {
 	context := samples.Context()
 
 	fmtChunk := chunk{DwFourCC: chunkFmt}

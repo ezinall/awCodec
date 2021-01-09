@@ -133,7 +133,7 @@ var pretab = [22]int{
 }
 
 // Decode MPEG1/MPEG2 format.
-func mpeg(file *bytes.Reader) (*pcm.F32LE, error) {
+func decodeMpeg(file *bytes.Reader) (*pcm.F32LE, error) {
 	var out = &pcm.F32LE{}
 
 	id3.ReadID3(file)
@@ -773,6 +773,6 @@ func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float3
 	}
 }
 
-var Mp1 = mpeg
-var Mp2 = mpeg
-var Mp3 = mpeg
+var DecodeMp1 = decodeMpeg
+var DecodeMp2 = decodeMpeg
+var DecodeMp3 = decodeMpeg
