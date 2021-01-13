@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"strings"
@@ -114,7 +115,200 @@ type AVIIndexEntry struct {
 }
 
 // DecodeAvi ...
-func DecodeAvi(path string) {
+func DecodeAvi(file *bytes.Reader) {
+	riff := list{}
+	if err := binary.Read(file, binary.LittleEndian, &riff); err != nil {
+		fmt.Println("binary.Read failed:", err)
+	}
+	//fmt.Printf("%+v\n", riff)
+
+	var hdrl bytes.Reader
+	var movi bytes.Reader
+	var info bytes.Reader
+	//var idx1 []byte
+
+	avih := MainAVIHeader{}
+	var strl []bytes.Reader
+	var vids []struct {
+		strh AVIStreamHeader
+		strf BitMapInfoHeader
+	}
+	var auds []struct {
+		strh AVIStreamHeader
+		strf WaveFormat
+	}
+	var txts [][]byte
+
+	infoData := make(map[[4]byte]interface{})
+
+	for file.Len() != 0 {
+		var fourCC [4]byte
+		_ = binary.Read(file, binary.LittleEndian, &fourCC)
+		var size uint32
+		_ = binary.Read(file, binary.LittleEndian, &size)
+		//fmt.Printf("%s\n", fourCC)
+
+		if fourCC == riffList { // LIST
+			var type_ [4]byte
+			_, _ = file.Read(type_[:])
+			//fmt.Printf("\t%s\n", type_)
+
+			data := make([]byte, size-4)
+			_, _ = file.Read(data)
+
+			switch type_ {
+			case listHdrl: // hdrl
+				hdrl = *bytes.NewReader(data)
+			case listMovi: // movi
+				movi = *bytes.NewReader(data)
+			case listInfo: // INFO
+				info = *bytes.NewReader(data)
+			}
+
+		} else if fourCC == chunkIdx1 { // idx1
+			_, _ = io.CopyN(ioutil.Discard, file, int64(size))
+
+		} else if fourCC == chunkJunk { // JUNK
+			_, _ = io.CopyN(ioutil.Discard, file, int64(size))
+		}
+	}
+
+	//fmt.Printf("\n%s\n", hdrl)
+	for hdrl.Len() != 0 {
+		var fourCC [4]byte
+		_ = binary.Read(&hdrl, binary.LittleEndian, &fourCC)
+		var size uint32
+		_ = binary.Read(&hdrl, binary.LittleEndian, &size)
+		//fmt.Printf("%s\n", fourCC)
+
+		if fourCC == chunkAvih { // avih
+			if err := binary.Read(&hdrl, binary.LittleEndian, &avih); err != nil {
+				fmt.Println("binary.Read failed:", err)
+			}
+
+		} else if fourCC == riffList { // LIST
+			var type_ [4]byte
+			_, _ = hdrl.Read(type_[:])
+			fmt.Printf("\t%s\n", type_)
+
+			if type_ == listStrl { // strl
+				data := make([]byte, size-4)
+				_, _ = hdrl.Read(data)
+				fmt.Println(string(data[:]))
+
+				strl = append(strl, *bytes.NewReader(data))
+
+			} else { // may be odml
+				_, _ = io.CopyN(ioutil.Discard, &hdrl, int64(size-4))
+			}
+
+		} else if fourCC == chunkJunk { // JUNK
+			_, _ = io.CopyN(ioutil.Discard, &hdrl, int64(size))
+		}
+	}
+	fmt.Printf("avih %+v\n", avih)
+
+	for _, stream := range strl {
+		var fourCC [4]byte
+		_ = binary.Read(&stream, binary.LittleEndian, &fourCC)
+		var size uint32
+		_ = binary.Read(&stream, binary.LittleEndian, &size)
+		//fmt.Printf("%s\n", fourCC)
+
+		strh := AVIStreamHeader{}
+		if err := binary.Read(&stream, binary.LittleEndian, &strh); err != nil {
+			fmt.Println("binary.Read failed:", err)
+		}
+		//fmt.Printf("strh %+v\n", strh)
+
+		switch strh.FccType {
+		case [4]byte{'v', 'i', 'd', 's'}:
+			data := struct {
+				strh AVIStreamHeader
+				strf BitMapInfoHeader
+			}{strh: strh}
+
+			for stream.Len() != 0 {
+				_ = binary.Read(&stream, binary.LittleEndian, &fourCC)
+				_ = binary.Read(&stream, binary.LittleEndian, &size)
+				fmt.Println(string(fourCC[:]), size)
+
+				if fourCC == chunkStrf {
+					if err := binary.Read(&stream, binary.LittleEndian, &data.strf); err != nil {
+						fmt.Println("binary.Read failed:", err)
+					}
+
+				} else {
+					data := make([]byte, size)
+					_, _ = stream.Read(data)
+					//fmt.Println(string(other[:]))
+				}
+			}
+
+			vids = append(vids, data)
+
+		case [4]byte{'a', 'u', 'd', 's'}:
+			data := struct {
+				strh AVIStreamHeader
+				strf WaveFormat
+			}{strh: strh}
+
+			for stream.Len() != 0 {
+				_ = binary.Read(&stream, binary.LittleEndian, &fourCC)
+				_ = binary.Read(&stream, binary.LittleEndian, &size)
+				fmt.Println(string(fourCC[:]), size)
+
+				if fourCC == chunkStrf {
+					if err := binary.Read(&stream, binary.LittleEndian, &data.strf); err != nil {
+						fmt.Println("binary.Read failed:", err)
+					}
+
+				} else {
+					data := make([]byte, size)
+					_, _ = stream.Read(data)
+					//fmt.Println(string(other[:]))
+				}
+			}
+
+			auds = append(auds, data)
+
+		case [4]byte{'t', 'x', 't', 's'}:
+			data := make([]byte, size)
+			stream.Read(data)
+			txts = append(txts, data)
+		}
+	}
+	fmt.Printf("vids %+v\n", vids)
+	fmt.Printf("auds %+v\n", auds)
+	fmt.Printf("txts %s\n", txts)
+
+	fmt.Println("movi", movi.Len())
+
+	//fmt.Printf("\n%s\n", info)
+	for info.Len() != 0 {
+		var fourCC [4]byte
+		_ = binary.Read(&info, binary.LittleEndian, &fourCC)
+		var size uint32
+		_ = binary.Read(&info, binary.LittleEndian, &size)
+		//fmt.Printf("%s\n", fourCC)
+
+		if fourCC == chunkJunk { // JUNK
+			_, _ = io.CopyN(ioutil.Discard, &info, int64(size))
+
+		} else {
+			data := make([]byte, size)
+			if err := binary.Read(&info, binary.LittleEndian, &data); err != nil {
+				fmt.Println("binary.Read failed:", err)
+			}
+			infoData[fourCC] = data
+			//fmt.Printf("\t%s\n", data)
+		}
+	}
+	fmt.Printf("info %s\n", infoData)
+}
+
+// Deprecated: test implementation
+func OldDecodeAvi(path string) {
 	content, err := ioutil.ReadFile(path)
 	if err != nil {
 		log.Fatal(err)
