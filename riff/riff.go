@@ -17,6 +17,7 @@ var (
 	chunkAvih = [4]byte{'a', 'v', 'i', 'h'}
 	chunkStrh = [4]byte{'s', 't', 'r', 'h'}
 	chunkStrf = [4]byte{'s', 't', 'r', 'f'}
+	chunkVprf = [4]byte{'v', 'p', 'r', 'p'}
 	chunkIdx1 = [4]byte{'i', 'd', 'x', '1'}
 	chunkData = [4]byte{'d', 'a', 't', 'a'}
 	chunkJunk = [4]byte{'J', 'U', 'N', 'K'}

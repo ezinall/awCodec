@@ -3,6 +3,7 @@ package main
 import (
 	"awCodec/riff"
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"log"
 )
@@ -26,5 +27,7 @@ func main() {
 	//riff.EncodeWave(out2, riff.WaveFormatPcm)
 	//riff.EncodeWave(out3, riff.WaveFormatMulaw)
 
-	riff.DecodeAvi(file)
+	out := riff.DecodeAvi(file)
+	fmt.Println(out.Duration(), out.Context())
+	riff.EncodeWave(riff.WaveFormatPcm, &out)
 }

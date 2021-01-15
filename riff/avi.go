@@ -1,6 +1,7 @@
 package riff
 
 import (
+	"awCodec/pcm"
 	"bytes"
 	"encoding/binary"
 	"fmt"
@@ -13,16 +14,16 @@ import (
 
 const (
 	// avih dwFlags
-	AvifHasindex       = 0x00000010
-	AvifMustuseindex   = 0x00000020
-	AvifIsinterleaved  = 0x00000100
-	AvifWascapturefile = 0x00010000
-	AvifCopyrighted    = 0x00020000
-	AvifTrustcktype    = 0x00000800
+	AviFHasIndex       = 0x00000010 // The file has an index
+	AviFMustUseIndex   = 0x00000020 //
+	AviFIsInterleaved  = 0x00000100
+	AviFWasCaptureFile = 0x00010000
+	AviFCopyrighted    = 0x00020000
+	AviFTrustCkType    = 0x00000800
 
 	// strh dwFlags
-	AvisfDisabled        = 0x00000001
-	AvisfVideoPalchanges = 0x00010000
+	AviSFDisabled        = 0x00000001
+	AviSFVideoPalChanges = 0x00010000
 
 	// bIndexType
 	AviIndexOfIndexes = 0x00
@@ -33,11 +34,11 @@ const (
 	AviIndex2field = 0x01
 
 	// idx1 chunk dwFlags
-	AviifList      = 0x00000001
-	AviifKeyframe  = 0x00000010
-	AviifFirstpart = 0x00000020
-	AviifLastpart  = 0x00000040
-	AviifNotime    = 0x00000100
+	AviIfList      = 0x00000001
+	AviIfKeyFrame  = 0x00000010
+	AviIfFirstPart = 0x00000020
+	AviIfLastPart  = 0x00000040
+	AviIfNoTime    = 0x00000100
 )
 
 type List struct {
@@ -107,6 +108,29 @@ type BitMapInfoHeader struct {
 	BiClrImportant  uint32
 }
 
+type VideoPropHeader struct {
+	VideoFormatToken      uint32
+	VideoStandard         uint32
+	DwVerticalRefreshRate uint32
+	DwHTotalInT           uint32
+	DwVTotalInLines       uint32
+	DwFrameAspectRatio    uint32
+	DwFrameWidthInPixels  uint32
+	DwFrameHeightInLines  uint32
+	NbFieldPerFrame       uint32
+}
+
+type VideoFieldDesc struct {
+	CompressedBMHeight   uint32
+	CompressedBMWidth    uint32
+	ValidBMHeight        uint32
+	ValidBMWidth         uint32
+	ValidBMXOffset       uint32
+	ValidBMYOffset       uint32
+	VideoXOffsetInT      uint32
+	VideoYValidStartLine uint32
+}
+
 type AVIIndexEntry struct {
 	Ckid          [4]byte
 	DwFlags       uint32
@@ -115,7 +139,9 @@ type AVIIndexEntry struct {
 }
 
 // DecodeAvi ...
-func DecodeAvi(file *bytes.Reader) {
+func DecodeAvi(file *bytes.Reader) pcm.S16LE {
+	samples := pcm.S16LE{}
+
 	riff := list{}
 	if err := binary.Read(file, binary.LittleEndian, &riff); err != nil {
 		fmt.Println("binary.Read failed:", err)
@@ -132,6 +158,7 @@ func DecodeAvi(file *bytes.Reader) {
 	var vids []struct {
 		strh AVIStreamHeader
 		strf BitMapInfoHeader
+		vprp VideoPropHeader
 	}
 	var auds []struct {
 		strh AVIStreamHeader
@@ -189,12 +216,12 @@ func DecodeAvi(file *bytes.Reader) {
 		} else if fourCC == riffList { // LIST
 			var type_ [4]byte
 			_, _ = hdrl.Read(type_[:])
-			fmt.Printf("\t%s\n", type_)
+			//fmt.Printf("\t%s\n", type_)
 
 			if type_ == listStrl { // strl
 				data := make([]byte, size-4)
 				_, _ = hdrl.Read(data)
-				fmt.Println(string(data[:]))
+				//fmt.Println(string(data[:]))
 
 				strl = append(strl, *bytes.NewReader(data))
 
@@ -207,6 +234,8 @@ func DecodeAvi(file *bytes.Reader) {
 		}
 	}
 	fmt.Printf("avih %+v\n", avih)
+	fmt.Println(avih.DwFlags&AviFHasIndex, avih.DwFlags&AviFMustUseIndex, avih.DwFlags&AviFIsInterleaved,
+		avih.DwFlags&AviFWasCaptureFile, avih.DwFlags&AviFCopyrighted, avih.DwFlags&AviFTrustCkType)
 
 	for _, stream := range strl {
 		var fourCC [4]byte
@@ -214,6 +243,10 @@ func DecodeAvi(file *bytes.Reader) {
 		var size uint32
 		_ = binary.Read(&stream, binary.LittleEndian, &size)
 		//fmt.Printf("%s\n", fourCC)
+
+		if fourCC != chunkStrh {
+			continue
+		}
 
 		strh := AVIStreamHeader{}
 		if err := binary.Read(&stream, binary.LittleEndian, &strh); err != nil {
@@ -226,27 +259,35 @@ func DecodeAvi(file *bytes.Reader) {
 			data := struct {
 				strh AVIStreamHeader
 				strf BitMapInfoHeader
+				vprp VideoPropHeader
 			}{strh: strh}
 
 			for stream.Len() != 0 {
 				_ = binary.Read(&stream, binary.LittleEndian, &fourCC)
 				_ = binary.Read(&stream, binary.LittleEndian, &size)
-				fmt.Println(string(fourCC[:]), size)
+				//fmt.Println(string(fourCC[:]), size)
 
 				if fourCC == chunkStrf {
 					if err := binary.Read(&stream, binary.LittleEndian, &data.strf); err != nil {
 						fmt.Println("binary.Read failed:", err)
 					}
 
-				} else {
-					data := make([]byte, size)
-					_, _ = stream.Read(data)
-					//fmt.Println(string(other[:]))
+				} else if fourCC == chunkVprf {
+					if err := binary.Read(&stream, binary.LittleEndian, &data.vprp); err != nil {
+						fmt.Println("binary.Read failed:", err)
+					}
+
+					for i := 0; i < int(data.vprp.NbFieldPerFrame); i++ {
+						desc := VideoFieldDesc{}
+						if err := binary.Read(&stream, binary.LittleEndian, &desc); err != nil {
+							fmt.Println("binary.Read failed:", err)
+						}
+						//fmt.Printf("%+v\n", desc)
+					}
 				}
 			}
 
 			vids = append(vids, data)
-
 		case [4]byte{'a', 'u', 'd', 's'}:
 			data := struct {
 				strh AVIStreamHeader
@@ -256,7 +297,7 @@ func DecodeAvi(file *bytes.Reader) {
 			for stream.Len() != 0 {
 				_ = binary.Read(&stream, binary.LittleEndian, &fourCC)
 				_ = binary.Read(&stream, binary.LittleEndian, &size)
-				fmt.Println(string(fourCC[:]), size)
+				//fmt.Println(string(fourCC[:]), size)
 
 				if fourCC == chunkStrf {
 					if err := binary.Read(&stream, binary.LittleEndian, &data.strf); err != nil {
@@ -264,17 +305,21 @@ func DecodeAvi(file *bytes.Reader) {
 					}
 
 				} else {
-					data := make([]byte, size)
-					_, _ = stream.Read(data)
+					temp := make([]byte, size)
+					_, _ = stream.Read(temp)
 					//fmt.Println(string(other[:]))
 				}
 			}
 
 			auds = append(auds, data)
-
 		case [4]byte{'t', 'x', 't', 's'}:
+			_ = binary.Read(&stream, binary.LittleEndian, &fourCC)
+			_ = binary.Read(&stream, binary.LittleEndian, &size)
+			//fmt.Println(string(fourCC[:]), size)
+
 			data := make([]byte, size)
-			stream.Read(data)
+			_, _ = stream.Read(data)
+			//fmt.Println(string(data[:]))
 			txts = append(txts, data)
 		}
 	}
@@ -283,6 +328,35 @@ func DecodeAvi(file *bytes.Reader) {
 	fmt.Printf("txts %s\n", txts)
 
 	fmt.Println("movi", movi.Len())
+	for movi.Len() != 0 {
+		var fourCC [4]byte
+		_ = binary.Read(&movi, binary.LittleEndian, &fourCC)
+		var size uint32
+		_ = binary.Read(&movi, binary.LittleEndian, &size)
+		//fmt.Println("movi", string(fourCC[:]), size)
+
+		if fourCC[2] == 'w' && fourCC[3] == 'b' {
+			if auds[0].strf.WFormatTag == WaveFormatPcm {
+				data := make([]int16, (size+size%2)/2)
+				_ = binary.Read(&movi, binary.LittleEndian, &data)
+				samples.Append(data)
+			}
+
+		} else if fourCC[2] == 'd' && fourCC[3] == 'c' {
+			_, _ = io.CopyN(ioutil.Discard, &movi, int64(size+size%2))
+
+		} else if fourCC[2] == 't' && fourCC[3] == 'x' {
+			data := make([]byte, size)
+			_, _ = movi.Read(data)
+			//fmt.Printf("%s\n", data[:])
+
+		} else if fourCC[0] == 'i' && fourCC[1] == 'x' {
+			_, _ = io.CopyN(ioutil.Discard, &movi, int64(size+size%2))
+
+		} else if fourCC == riffList {
+			// do nothing
+		}
+	}
 
 	//fmt.Printf("\n%s\n", info)
 	for info.Len() != 0 {
@@ -305,6 +379,10 @@ func DecodeAvi(file *bytes.Reader) {
 		}
 	}
 	fmt.Printf("info %s\n", infoData)
+
+	samples.Context().SampleRate = int(auds[0].strf.NSamplesPerSec)
+	samples.Context().Channels = int(auds[0].strf.NChannels)
+	return samples
 }
 
 // Deprecated: test implementation
