@@ -278,7 +278,7 @@ const (
 	WaveFormatDevelopment             uint16 = 0xFFFF             // Development / Unregistered
 )
 
-// WaveFormat ...
+// WaveFormat general waveform format structure (information common to all formats).
 type WaveFormat struct {
 	WFormatTag      uint16 // Format type
 	NChannels       uint16 // Number of channels (i.e. mono, stereo...)
@@ -287,10 +287,18 @@ type WaveFormat struct {
 	NBlockAlign     uint16 // Block size of data
 }
 
-// PcmWaveFormat ...
+// PcmWaveFormat specific waveform format structure for PCM data.
 type PcmWaveFormat struct {
-	Wf             WaveFormat
-	WBitsPerSample uint16 // Number of bits per sample
+	WaveFormat
+	WBitsPerSample uint16 // Number of bits per sample of mono data
+}
+
+// WaveFormatEx general extended waveform format structure.
+// Use this for all NON PCM formats (information common to all formats).
+type WaveFormatEx struct {
+	WaveFormat
+	WBitsPerSample uint16 // Number of bits per sample of mono data
+	CbSize         uint16 // The count in bytes of the size of extra information (after cbSize)
 }
 
 // EncodeWave ...
@@ -303,14 +311,14 @@ func EncodeWave(waveFormat uint16, samples pcm.Samples) {
 	switch waveFormat {
 	case WaveFormatPcm, WaveFormatIeeeFloat, WaveFormatAlaw, WaveFormatMulaw:
 		fmtData := PcmWaveFormat{
-			Wf: WaveFormat{
-				WFormatTag:      waveFormat,
-				NChannels:       uint16(context.Channels),
-				NSamplesPerSec:  uint32(context.SampleRate),
-				NAvgBytesPerSec: uint32(context.SampleRate * context.Channels * samples.BitPerSample() / 8),
-				NBlockAlign:     uint16(context.Channels * samples.BitPerSample() / 8),
+			WaveFormat{
+				waveFormat,
+				uint16(context.Channels),
+				uint32(context.SampleRate),
+				uint32(context.SampleRate * context.Channels * samples.BitPerSample() / 8),
+				uint16(context.Channels * samples.BitPerSample() / 8),
 			},
-			WBitsPerSample: uint16(samples.BitPerSample()),
+			uint16(samples.BitPerSample()),
 		}
 		_ = binary.Write(&fmtChunkData, binary.LittleEndian, fmtData)
 	}

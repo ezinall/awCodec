@@ -7,7 +7,6 @@ var (
 	formatAvi  = [4]byte{'A', 'V', 'I', ' '}
 
 	riffList = [4]byte{'L', 'I', 'S', 'T'}
-
 	listHdrl = [4]byte{'h', 'd', 'r', 'l'}
 	listStrl = [4]byte{'s', 't', 'r', 'l'}
 	listMovi = [4]byte{'m', 'o', 'v', 'i'}

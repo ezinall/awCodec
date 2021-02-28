@@ -84,7 +84,7 @@ type AVIStreamHeader struct {
 	DwStart               uint32
 	DwLength              uint32 // In units above...
 	DwSuggestedBufferSize uint32
-	DwQuality             uint32
+	DwQuality             int32 // DWORD?
 	DwSampleSize          uint32
 	RcFrame               struct {
 		Left   uint16
@@ -162,7 +162,7 @@ func DecodeAvi(file *bytes.Reader) pcm.S16LE {
 	}
 	var auds []struct {
 		strh AVIStreamHeader
-		strf WaveFormat
+		strf WaveFormatEx
 	}
 	var txts [][]byte
 
@@ -170,7 +170,7 @@ func DecodeAvi(file *bytes.Reader) pcm.S16LE {
 
 	for file.Len() != 0 {
 		var fourCC [4]byte
-		_ = binary.Read(file, binary.LittleEndian, &fourCC)
+		_, _ = file.Read(fourCC[:])
 		var size uint32
 		_ = binary.Read(file, binary.LittleEndian, &size)
 		//fmt.Printf("%s\n", fourCC)
@@ -203,7 +203,7 @@ func DecodeAvi(file *bytes.Reader) pcm.S16LE {
 	//fmt.Printf("\n%s\n", hdrl)
 	for hdrl.Len() != 0 {
 		var fourCC [4]byte
-		_ = binary.Read(&hdrl, binary.LittleEndian, &fourCC)
+		_, _ = hdrl.Read(fourCC[:])
 		var size uint32
 		_ = binary.Read(&hdrl, binary.LittleEndian, &size)
 		//fmt.Printf("%s\n", fourCC)
@@ -234,12 +234,10 @@ func DecodeAvi(file *bytes.Reader) pcm.S16LE {
 		}
 	}
 	fmt.Printf("avih %+v\n", avih)
-	fmt.Println(avih.DwFlags&AviFHasIndex, avih.DwFlags&AviFMustUseIndex, avih.DwFlags&AviFIsInterleaved,
-		avih.DwFlags&AviFWasCaptureFile, avih.DwFlags&AviFCopyrighted, avih.DwFlags&AviFTrustCkType)
 
 	for _, stream := range strl {
 		var fourCC [4]byte
-		_ = binary.Read(&stream, binary.LittleEndian, &fourCC)
+		_, _ = stream.Read(fourCC[:])
 		var size uint32
 		_ = binary.Read(&stream, binary.LittleEndian, &size)
 		//fmt.Printf("%s\n", fourCC)
@@ -263,7 +261,7 @@ func DecodeAvi(file *bytes.Reader) pcm.S16LE {
 			}{strh: strh}
 
 			for stream.Len() != 0 {
-				_ = binary.Read(&stream, binary.LittleEndian, &fourCC)
+				_, _ = stream.Read(fourCC[:])
 				_ = binary.Read(&stream, binary.LittleEndian, &size)
 				//fmt.Println(string(fourCC[:]), size)
 
@@ -288,32 +286,37 @@ func DecodeAvi(file *bytes.Reader) pcm.S16LE {
 			}
 
 			vids = append(vids, data)
+
 		case [4]byte{'a', 'u', 'd', 's'}:
 			data := struct {
 				strh AVIStreamHeader
-				strf WaveFormat
+				strf WaveFormatEx
 			}{strh: strh}
 
 			for stream.Len() != 0 {
-				_ = binary.Read(&stream, binary.LittleEndian, &fourCC)
+				_, _ = stream.Read(fourCC[:])
 				_ = binary.Read(&stream, binary.LittleEndian, &size)
 				//fmt.Println(string(fourCC[:]), size)
 
 				if fourCC == chunkStrf {
-					if err := binary.Read(&stream, binary.LittleEndian, &data.strf); err != nil {
+					r := io.LimitReader(&stream, int64(size))
+					if err := binary.Read(r, binary.LittleEndian, &data.strf); err != nil {
 						fmt.Println("binary.Read failed:", err)
 					}
 
-				} else {
+					ex := make([]byte, data.strf.CbSize)
+					_, _ = r.Read(ex)
+
+				} else { // JUNK
 					temp := make([]byte, size)
 					_, _ = stream.Read(temp)
-					//fmt.Println(string(other[:]))
 				}
 			}
 
 			auds = append(auds, data)
+
 		case [4]byte{'t', 'x', 't', 's'}:
-			_ = binary.Read(&stream, binary.LittleEndian, &fourCC)
+			_, _ = stream.Read(fourCC[:])
 			_ = binary.Read(&stream, binary.LittleEndian, &size)
 			//fmt.Println(string(fourCC[:]), size)
 
@@ -321,25 +324,35 @@ func DecodeAvi(file *bytes.Reader) pcm.S16LE {
 			_, _ = stream.Read(data)
 			//fmt.Println(string(data[:]))
 			txts = append(txts, data)
+
+		case [4]byte{'m', 'i', 'd', 's'}:
+			_, _ = stream.Read(fourCC[:])
+			_ = binary.Read(&stream, binary.LittleEndian, &size)
+			_, _ = io.CopyN(ioutil.Discard, &stream, int64(size))
 		}
 	}
 	fmt.Printf("vids %+v\n", vids)
 	fmt.Printf("auds %+v\n", auds)
 	fmt.Printf("txts %s\n", txts)
 
-	fmt.Println("movi", movi.Len())
+	// Parse movi list.
+	//fmt.Println("movi", movi.Len())
 	for movi.Len() != 0 {
 		var fourCC [4]byte
-		_ = binary.Read(&movi, binary.LittleEndian, &fourCC)
+		_, _ = movi.Read(fourCC[:])
 		var size uint32
 		_ = binary.Read(&movi, binary.LittleEndian, &size)
 		//fmt.Println("movi", string(fourCC[:]), size)
 
 		if fourCC[2] == 'w' && fourCC[3] == 'b' {
-			if auds[0].strf.WFormatTag == WaveFormatPcm {
+			switch auds[0].strf.WFormatTag {
+			case WaveFormatPcm:
 				data := make([]int16, (size+size%2)/2)
 				_ = binary.Read(&movi, binary.LittleEndian, &data)
+
 				samples.Append(data)
+			default:
+				_, _ = io.CopyN(ioutil.Discard, &movi, int64(size+size%2))
 			}
 
 		} else if fourCC[2] == 'd' && fourCC[3] == 'c' {
@@ -358,7 +371,7 @@ func DecodeAvi(file *bytes.Reader) pcm.S16LE {
 		}
 	}
 
-	//fmt.Printf("\n%s\n", info)
+	// Parse INFO list.
 	for info.Len() != 0 {
 		var fourCC [4]byte
 		_ = binary.Read(&info, binary.LittleEndian, &fourCC)
@@ -380,8 +393,10 @@ func DecodeAvi(file *bytes.Reader) pcm.S16LE {
 	}
 	fmt.Printf("info %s\n", infoData)
 
-	samples.Context().SampleRate = int(auds[0].strf.NSamplesPerSec)
-	samples.Context().Channels = int(auds[0].strf.NChannels)
+	if len(auds) != 0 {
+		samples.Context().SampleRate = int(auds[0].strf.NSamplesPerSec)
+		samples.Context().Channels = int(auds[0].strf.NChannels)
+	}
 	return samples
 }
 
