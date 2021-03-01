@@ -302,26 +302,37 @@ type WaveFormatEx struct {
 }
 
 // EncodeWave ...
-func EncodeWave(waveFormat uint16, samples pcm.Samples) {
+func EncodeWave(formatTag uint16, samples pcm.Samples) {
 	context := samples.Context()
 
 	fmtChunk := chunk{DwFourCC: chunkFmt}
 	var fmtChunkData = bytes.Buffer{}
 
-	switch waveFormat {
-	case WaveFormatPcm, WaveFormatIeeeFloat, WaveFormatAlaw, WaveFormatMulaw:
-		fmtData := PcmWaveFormat{
-			WaveFormat{
-				waveFormat,
-				uint16(context.Channels),
-				uint32(context.SampleRate),
-				uint32(context.SampleRate * context.Channels * samples.BitPerSample() / 8),
-				uint16(context.Channels * samples.BitPerSample() / 8),
-			},
+	waveFormat := WaveFormat{
+		formatTag,
+		uint16(context.Channels),
+		uint32(context.SampleRate),
+		uint32(context.SampleRate * context.Channels * samples.BitPerSample() / 8),
+		uint16(context.Channels * samples.BitPerSample() / 8),
+	}
+
+	var fmtData interface{}
+	switch formatTag {
+	case WaveFormatPcm:
+		fmtData = PcmWaveFormat{
+			waveFormat,
 			uint16(samples.BitPerSample()),
 		}
 		_ = binary.Write(&fmtChunkData, binary.LittleEndian, fmtData)
+
+	default:
+		fmtData = WaveFormatEx{
+			waveFormat,
+			uint16(samples.BitPerSample()),
+			0,
+		}
 	}
+	_ = binary.Write(&fmtChunkData, binary.LittleEndian, fmtData)
 
 	fmtChunk.DwSize = uint32(fmtChunkData.Len())
 

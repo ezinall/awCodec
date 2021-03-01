@@ -133,7 +133,7 @@ var pretab = [22]int{
 }
 
 // Decode MPEG1/MPEG2 format.
-func decodeMpeg(file *bytes.Reader) (*pcm.F32LE, error) {
+func decodeMpeg1(file *bytes.Reader) (*pcm.F32LE, error) {
 	var out = &pcm.F32LE{}
 
 	id3.ReadID3(file)
@@ -716,7 +716,6 @@ func frequencyInversion(gr, ch int, is *[2][2][iblen]float32) {
 func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float32, pcm []float32) {
 	uVec := [512]float32{}
 	wVec := [512]float32{}
-	//pcm := [iblen]float32{}
 
 	tempVec := [32]float32{}
 
@@ -755,14 +754,7 @@ func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float3
 			for j := 0; j < 512; j += 32 {
 				S += wVec[j+i]
 			}
-			//sample := int(S * math.MaxInt16)
-			//if sample > math.MaxInt16 {
-			//	sample = math.MaxInt16
-			//} else if sample < -math.MaxInt16 {
-			//	sample = -math.MaxInt16
-			//}
 
-			//s := int16(sample)
 			idx := 2 * (32*sb + i)
 			if ch == 0 {
 				pcm[idx] = S
@@ -773,6 +765,6 @@ func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float3
 	}
 }
 
-var DecodeMp1 = decodeMpeg
-var DecodeMp2 = decodeMpeg
-var DecodeMp3 = decodeMpeg
+var DecodeMp1 = decodeMpeg1
+var DecodeMp2 = decodeMpeg1
+var DecodeMp3 = decodeMpeg1
