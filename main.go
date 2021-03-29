@@ -1,9 +1,8 @@
 package main
 
 import (
-	"awCodec/riff"
+	"awCodec/mpeg"
 	"bytes"
-	"fmt"
 	"io/ioutil"
 	"log"
 )
@@ -11,11 +10,14 @@ import (
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	content, err := ioutil.ReadFile("_dacha.avi")
+	content, err := ioutil.ReadFile("file_example_MP4_480_1_5MG.mp4")
 	if err != nil {
 		log.Fatal(err)
 	}
-	file := bytes.NewReader(content)
+	file := bytes.NewBuffer(content)
+
+	mpeg.Mp4(file)
+
 	//out, _ := mpeg.DecodeMp3(file)
 
 	//fmt.Println(out.Duration())
@@ -27,7 +29,7 @@ func main() {
 	//riff.EncodeWave(out2, riff.WaveFormatPcm)
 	//riff.EncodeWave(out3, riff.WaveFormatMulaw)
 
-	out := riff.DecodeAvi(file)
-	fmt.Println(out.Duration(), out.Context())
-	riff.EncodeWave(riff.WaveFormatPcm, &out)
+	//out := riff.DecodeAvi(file)
+	//fmt.Println(out.Duration(), out.Context())
+	//riff.EncodeWave(riff.WaveFormatIeeeFloat, out)
 }

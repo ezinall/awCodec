@@ -323,8 +323,6 @@ func EncodeWave(formatTag uint16, samples pcm.Samples) {
 			waveFormat,
 			uint16(samples.BitPerSample()),
 		}
-		_ = binary.Write(&fmtChunkData, binary.LittleEndian, fmtData)
-
 	default:
 		fmtData = WaveFormatEx{
 			waveFormat,

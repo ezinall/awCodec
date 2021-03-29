@@ -100,7 +100,7 @@ func ReadID3(buffer *bytes.Reader) {
 	if err := binary.Read(buffer, binary.BigEndian, &header); err != nil {
 		log.Println(err)
 	}
-	fmt.Printf("%+v\n", header)
+	//fmt.Printf("%+v\n", header)
 
 	size := (uint32(header.Size[0]) << 21) | (uint32(header.Size[1]) << 14) |
 		(uint32(header.Size[2]) << 7) | uint32(header.Size[3])
@@ -120,7 +120,7 @@ func ReadID3(buffer *bytes.Reader) {
 			break
 		}
 
-		fmt.Printf("%s, %d, %d\n", frame.FrameID, frame.Size, frame.Flags)
+		//fmt.Printf("%s, %d, %d\n", frame.FrameID, frame.Size, frame.Flags)
 
 		frameId := string(frame.FrameID[:])
 		switch {
@@ -157,7 +157,7 @@ func ReadID3(buffer *bytes.Reader) {
 				reader = transform.NewReader(io.LimitReader(id3Tag, int64(frame.Size)-1), encoder.NewDecoder())
 
 			case encodingUTF8:
-				// Do nothing.
+				reader = id3Tag
 
 			default:
 				reader = charmap.ISO8859_1.NewDecoder().Reader(io.LimitReader(id3Tag, int64(frame.Size)-1))
