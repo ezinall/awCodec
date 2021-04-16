@@ -550,14 +550,14 @@ func OldDecodeAvi(path string) {
 			// fmt.Printf("\t\t%s %d\n", dwFourCC, dwSize)
 
 			index += int(dwSize) + 8 + int(dwSize%2)
-		} else if dwFourCC := movi.Data[index : index+4]; strings.Contains(string(dwFourCC), "db") {
+		} else if strings.Contains(string(dwFourCC), "db") {
 			dwSize := binary.LittleEndian.Uint32(movi.Data[index+4 : index+8])
 			_ = movi.Data[index+8 : index+8+int(dwSize)]
 
 			// fmt.Printf("\t\t%s %d\n", dwFourCC, dwSize)
 
 			index += int(dwSize) + 8
-		} else if dwFourCC := movi.Data[index : index+4]; strings.Contains(string(dwFourCC), "dc") {
+		} else if strings.Contains(string(dwFourCC), "dc") {
 			dwSize := binary.LittleEndian.Uint32(movi.Data[index+4 : index+8])
 			_ = movi.Data[index+8 : index+8+int(dwSize)]
 
@@ -566,7 +566,7 @@ func OldDecodeAvi(path string) {
 			// moveData = append(moveData, movi.Data[index+8:index+8+int(dwSize)])
 
 			index += int(dwSize) + 8 + int(dwSize%2)
-		} else if dwFourCC := movi.Data[index : index+4]; strings.Contains(string(dwFourCC), "tx") {
+		} else if strings.Contains(string(dwFourCC), "tx") {
 			dwSize := binary.LittleEndian.Uint32(movi.Data[index+4 : index+8])
 			_ = movi.Data[index+8 : index+8+int(dwSize)]
 
@@ -575,7 +575,7 @@ func OldDecodeAvi(path string) {
 			// fmt.Printf("%s\n", movi.Data[index+8:index+8+int(dwSize)])
 
 			index += int(dwSize) + 8
-		} else if dwFourCC := movi.Data[index : index+4]; strings.Contains(string(dwFourCC), "ix") {
+		} else if strings.Contains(string(dwFourCC), "ix") {
 			dwSize := binary.LittleEndian.Uint32(movi.Data[index+4 : index+8])
 			_ = movi.Data[index+8 : index+8+int(dwSize)]
 
