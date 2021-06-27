@@ -225,7 +225,7 @@ var (
 //	moovType uint32 = 0x6D6F6F76
 //)
 
-func mpeg12(file *bytes.Buffer) {
+func mpeg12(file *bytes.Reader) {
 	var moov *bytes.Buffer
 	var trakList []*bytes.Buffer
 	var mdat []*bytes.Buffer
@@ -260,7 +260,11 @@ func mpeg12(file *bytes.Buffer) {
 			size = uint64(file.Len())
 		}
 
-		boxData := bytes.NewBuffer(file.Next(int(size - uint64(unsafe.Sizeof(Box{})))))
+		buf := make([]byte, int(size-uint64(unsafe.Sizeof(Box{}))))
+		file.Read(buf)
+		boxData := bytes.NewBuffer(buf)
+
+		//boxData := bytes.NewBuffer(file.Next(int(size - uint64(unsafe.Sizeof(Box{})))))
 
 		if box.Type == moovType {
 			moov = boxData

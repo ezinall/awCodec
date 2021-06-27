@@ -8,49 +8,26 @@ import (
 	"math"
 )
 
-type Header struct {
-	SyncWord          uint16 // 12 bits
-	ID                byte   // 1 bit
-	Layer             byte   // 2 bits
-	ProtectionBit     byte   // 1 bit
-	BitrateIndex      byte   // 4 bits
-	SamplingFrequency byte   // 2 bits
-	PaddingBit        byte   // 1 bits
-	PrivateBit        byte   // 1 bit
-	Mode              byte   // 2 bits
-	ModeExtension     byte   // 2 bits
-	Copyright         byte   // 1 bit
-	Copy              byte   // 1 bit
-	Emphasis          byte   // 2 bits
-}
-
 const (
-	// Header.SyncWord
 	syncWord = 0xFFF
 
-	// Header.ID
 	mpeg1 = 0b1
 	mpeg2 = 0b0
 
-	// Header.Layer
 	layer1        = 0b11
 	layer2        = 0b10
 	layer3        = 0b01
 	layerReserved = 0b00
 
-	// Header.ProtectionBit
 	protected = 0b0
 
-	// Header.PaddingBit
 	padding = 0b1
 
-	// Header.Mode specified
 	modeStereo        = 0b00
 	modeJoinStereo    = 0b01 // intensity_stereo and/or ms_stereo
 	modeDualChannel   = 0b10
 	modeSingleChannel = 0b11
 
-	// Header.ModeExtension specifies
 	intensityStereo = 0b01
 	msStereo        = 0b10
 )
@@ -67,8 +44,8 @@ var bitrateSpecified = [3][16]int{
 		256000, 288000, 320000, 352000, 384000, 416000, 448000, 0}, // Bit/s
 }
 
-var frequencySpecified = [4]int{
-	44100, 48000, 32000, 0, // Hz
+var frequencySpecified = [3]int{
+	44100, 48000, 32000, // Hz
 }
 
 const iblen = 576 // Frequency lines of each granule
@@ -133,65 +110,63 @@ var pretab = [22]int{
 }
 
 // Decode MPEG1/MPEG2 format.
-func decodeMpeg1(file *bytes.Reader) (*pcm.F32LE, error) {
+func decodeMpeg1(file []byte) (*pcm.F32LE, error) {
 	var out = &pcm.F32LE{}
 
-	id3.ReadID3(file)
+	file, _ = id3.ReadID3(file)
+
+	fileBuf := bytes.NewBuffer(file)
 
 	var prevData []byte
 	prevSamples := [2][32][18]float32{}
 	vVec := [2][1024]float32{}
-	for file.Len() != 0 {
+	for fileBuf.Len() != 0 {
 		// Header ======================================================================================================
-		buf := make([]byte, 4)
-		file.Read(buf)
+		buf := fileBuf.Next(4)
 		//fmt.Printf("%08b\n", buf)
 
 		h := int32(buf[0])<<24 | int32(buf[1])<<16 | int32(buf[2])<<8 | int32(buf[3])
-		header := Header{
-			uint16(h >> 20 & 0xFFF),
-			uint8(h >> 19 & 0x1),
-			uint8(h >> 17 & 0x3),
-			uint8(h >> 16 & 0x1),
-			uint8(h >> 12 & 0xF),
-			uint8(h >> 10 & 0x3),
-			uint8(h >> 9 & 0x1),
-			uint8(h >> 8 & 0x1),
-			uint8(h >> 6 & 0x3),
-			uint8(h >> 4 & 0x3),
-			uint8(h >> 3 & 0x1),
-			uint8(h >> 2 & 0x1),
-			uint8(h >> 0 & 0x3),
-		}
 
-		if header.SyncWord != syncWord {
+		sw := uint16(h >> 20 & 0xFFF)
+		if sw != syncWord {
 			break
 		}
-		//fmt.Printf("%+v\n", header)
+
+		//ID := uint8(h >> 19 & 0x1)
+		layer := uint8(h >> 17 & 0x3)
+		protectionBit := uint8(h >> 16 & 0x1)
+		bitrateIndex := uint8(h >> 12 & 0xF)
+		samplingFrequency := uint8(h >> 10 & 0x3)
+		paddingBit := uint8(h >> 9 & 0x1)
+		//privateBit := uint8(h >> 8 & 0x1)
+		mode := uint8(h >> 6 & 0x3)
+		modeExtension := uint8(h >> 4 & 0x3)
+		//copyright := uint8(h >> 3 & 0x1)
+		//copy := uint8(h >> 2 & 0x1)
+		//emphasis := uint8(h >> 0 & 0x3)
 
 		// Frame length ===============================================================================================
 		frameSize := 144 // byte for layer2 and layer3 1152/(1b*8bit) = 144; for layer1 384/(4b*8bit) = 12
-		bitrate := bitrateSpecified[header.Layer-1][header.BitrateIndex]
-		samplingFrequency := frequencySpecified[header.SamplingFrequency]
-		frameLength := frameSize * bitrate / samplingFrequency
-		if header.PaddingBit == padding {
+		bitrate := bitrateSpecified[layer-1][bitrateIndex]
+		sampleRate := frequencySpecified[samplingFrequency]
+		frameLength := frameSize * bitrate / sampleRate
+		if paddingBit == padding {
 			frameLength += 1
 		}
-		//fmt.Println(bitrate/1000, samplingFrequency, frameLength)
+		//fmt.Println(bitrate/1000, sampleRate, frameLength)
 
 		if out.Context().SampleRate == 0 {
-			out.Context().SampleRate = samplingFrequency
+			out.Context().SampleRate = sampleRate
 		}
 
 		// CRC Check ===================================================================================================
-		if header.ProtectionBit == protected {
-			crc := make([]byte, 2)
-			file.Read(crc)
+		if protectionBit == protected {
+			_ = fileBuf.Next(2) // crc
 		}
 
 		// AudioData ===================================================================================================
 		nch := 2 // Number of channels; equals 1 for single_channel mode, equals 2 for other modes.
-		if header.Mode == modeSingleChannel {
+		if mode == modeSingleChannel {
 			nch = 1
 		}
 
@@ -201,20 +176,16 @@ func decodeMpeg1(file *bytes.Reader) (*pcm.F32LE, error) {
 
 		// Side Information ==========================================================================================
 		sideInformationLength := 32
-		if header.Mode == modeSingleChannel {
+		if mode == modeSingleChannel {
 			sideInformationLength = 17
 		}
 
-		buf = make([]uint8, sideInformationLength)
-		file.Read(buf)
-		//fmt.Printf("%08b\n", bitReader.bytes)
-
-		sideInfoBitReader := utils.NewBitReader(buf)
+		sideInfoBitReader := utils.NewBitReader(fileBuf.Next(sideInformationLength))
 
 		sideInfo := sideInformation{}
 		sideInfo.MainDataBegin = uint16(sideInfoBitReader.ReadBits(9)) // main_data_begin
 
-		if header.Mode == modeSingleChannel {
+		if mode == modeSingleChannel {
 			sideInfo.PrivateBits = byte(sideInfoBitReader.ReadBits(5)) // private_bits
 		} else {
 			sideInfo.PrivateBits = byte(sideInfoBitReader.ReadBits(3)) // private_bits
@@ -279,12 +250,11 @@ func decodeMpeg1(file *bytes.Reader) (*pcm.F32LE, error) {
 
 		// Main Data ==================================================================================================
 		mainDataLength := frameLength - sideInformationLength - 4 // 4 bytes header
-		if header.ProtectionBit == protected {
+		if protectionBit == protected {
 			mainDataLength -= 2
 		}
 
-		mainData := make([]byte, mainDataLength)
-		file.Read(mainData)
+		mainData := fileBuf.Next(mainDataLength)
 
 		if sideInfo.MainDataBegin != 0 {
 			mainData = append(prevData[len(prevData)-int(sideInfo.MainDataBegin):], mainData...)
@@ -387,8 +357,8 @@ func decodeMpeg1(file *bytes.Reader) (*pcm.F32LE, error) {
 					region0 = 36
 					region1 = iblen
 				} else {
-					region0 = bandIndex[header.SamplingFrequency][0][sideInfo.Region0Count[gr][ch]+1]
-					region1 = bandIndex[header.SamplingFrequency][0][sideInfo.Region0Count[gr][ch]+1+sideInfo.Region1Count[gr][ch]+1]
+					region0 = bandIndex[samplingFrequency][0][sideInfo.Region0Count[gr][ch]+1]
+					region1 = bandIndex[samplingFrequency][0][sideInfo.Region0Count[gr][ch]+1+sideInfo.Region1Count[gr][ch]+1]
 				}
 				//fmt.Printf("region0 %+v region1 %+v\n", region0, region1)
 
@@ -438,10 +408,10 @@ func decodeMpeg1(file *bytes.Reader) (*pcm.F32LE, error) {
 		samples := make([]float32, iblen*2*2) // iblen * number granules * byte count per sample
 		for gr := 0; gr < 2; gr++ {
 			for ch := 0; ch < nch; ch++ {
-				requantize(gr, ch, header, sideInfo, scalefac, &is, countValues)
-				reorder(gr, ch, header, sideInfo, &is, countValues)
+				requantize(gr, ch, samplingFrequency, sideInfo, scalefac, &is, countValues)
+				reorder(gr, ch, samplingFrequency, sideInfo, &is, countValues)
 			}
-			stereo(gr, header, &is)
+			stereo(gr, mode, modeExtension, &is)
 			for ch := 0; ch < nch; ch++ {
 				aliasReduction(gr, ch, sideInfo, &is)
 				imdct(gr, ch, sideInfo.BlockType[gr][ch], &is, &prevSamples)
@@ -455,7 +425,7 @@ func decodeMpeg1(file *bytes.Reader) (*pcm.F32LE, error) {
 	return out, nil
 }
 
-func requantize(gr, ch int, header Header, sideInfo sideInformation, scalefac Scalefac, is *[2][2][iblen]float32, countValues [2][2]int) {
+func requantize(gr, ch int, samplingFrequency uint8, sideInfo sideInformation, scalefac Scalefac, is *[2][2][iblen]float32, countValues [2][2]int) {
 	var (
 		A, B float64
 	)
@@ -470,11 +440,11 @@ func requantize(gr, ch int, header Header, sideInfo sideInformation, scalefac Sc
 	if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == blockShort { // Short blocks
 		if sideInfo.MixedBlockFlag[gr][ch] == 1 { // 2 long sb first
 			sfb := 0
-			nextSfb := bandIndex[header.SamplingFrequency][0][sfb+1]
+			nextSfb := bandIndex[samplingFrequency][0][sfb+1]
 			for i := 0; i < 36; i++ {
 				if i == nextSfb {
 					sfb++
-					nextSfb = bandIndex[header.SamplingFrequency][0][sfb+1]
+					nextSfb = bandIndex[samplingFrequency][0][sfb+1]
 				}
 				A = float64(sideInfo.GlobalGain[gr][ch]) - 210
 				B = scalefacMultiplier * float64(int(scalefac.L[gr][ch][sfb])+int(sideInfo.Preflag[gr][ch])*pretab[sfb])
@@ -484,13 +454,13 @@ func requantize(gr, ch int, header Header, sideInfo sideInformation, scalefac Sc
 					math.Pow(2, A/4.0) * math.Pow(2, -B))
 			}
 			sfb = 3
-			nextSfb = bandIndex[header.SamplingFrequency][1][sfb+1] * 3
-			windowLen := bandIndex[header.SamplingFrequency][1][sfb+1] - bandIndex[header.SamplingFrequency][1][sfb]
+			nextSfb = bandIndex[samplingFrequency][1][sfb+1] * 3
+			windowLen := bandIndex[samplingFrequency][1][sfb+1] - bandIndex[samplingFrequency][1][sfb]
 			for i := 36; i < countValues[gr][ch]; {
 				if i == nextSfb {
 					sfb++
-					nextSfb = bandIndex[header.SamplingFrequency][1][sfb+1] * 3
-					windowLen = bandIndex[header.SamplingFrequency][1][sfb+1] - bandIndex[header.SamplingFrequency][1][sfb]
+					nextSfb = bandIndex[samplingFrequency][1][sfb+1] * 3
+					windowLen = bandIndex[samplingFrequency][1][sfb+1] - bandIndex[samplingFrequency][1][sfb]
 				}
 				for window := 0; window < 3; window++ {
 					for j := 0; j < windowLen; j++ {
@@ -509,13 +479,13 @@ func requantize(gr, ch int, header Header, sideInfo sideInformation, scalefac Sc
 			}
 		} else { // Only short blocks
 			sfb := 0
-			nextSfb := bandIndex[header.SamplingFrequency][1][sfb+1] * 3
-			windowLen := bandIndex[header.SamplingFrequency][1][sfb+1] - bandIndex[header.SamplingFrequency][1][sfb]
+			nextSfb := bandIndex[samplingFrequency][1][sfb+1] * 3
+			windowLen := bandIndex[samplingFrequency][1][sfb+1] - bandIndex[samplingFrequency][1][sfb]
 			for i := 0; i < countValues[gr][ch]; {
 				if i == nextSfb {
 					sfb++
-					nextSfb = bandIndex[header.SamplingFrequency][1][sfb+1] * 3
-					windowLen = bandIndex[header.SamplingFrequency][1][sfb+1] - bandIndex[header.SamplingFrequency][1][sfb]
+					nextSfb = bandIndex[samplingFrequency][1][sfb+1] * 3
+					windowLen = bandIndex[samplingFrequency][1][sfb+1] - bandIndex[samplingFrequency][1][sfb]
 				}
 				for window := 0; window < 3; window++ {
 					for j := 0; j < windowLen; j++ {
@@ -533,11 +503,11 @@ func requantize(gr, ch int, header Header, sideInfo sideInformation, scalefac Sc
 		}
 	} else { // Only long blocks
 		sfb := 0
-		nextSfb := bandIndex[header.SamplingFrequency][0][sfb+1]
+		nextSfb := bandIndex[samplingFrequency][0][sfb+1]
 		for i := 0; i < countValues[gr][ch]; i++ {
 			if i == nextSfb {
 				sfb++
-				nextSfb = bandIndex[header.SamplingFrequency][0][sfb+1]
+				nextSfb = bandIndex[samplingFrequency][0][sfb+1]
 			}
 			A = float64(sideInfo.GlobalGain[gr][ch]) - 210
 			B = scalefacMultiplier * float64(int(scalefac.L[gr][ch][sfb])+int(sideInfo.Preflag[gr][ch])*pretab[sfb])
@@ -580,9 +550,9 @@ func requantize(gr, ch int, header Header, sideInfo sideInformation, scalefac Sc
 	//}
 }
 
-func reorder(gr, ch int, header Header, sideInfo sideInformation, is *[2][2][iblen]float32, countValues [2][2]int) {
+func reorder(gr, ch int, samplingFrequency uint8, sideInfo sideInformation, is *[2][2][iblen]float32, countValues [2][2]int) {
 	samplesBuf := make([]float32, iblen)
-	shortBand := bandIndex[header.SamplingFrequency][1]
+	shortBand := bandIndex[samplingFrequency][1]
 
 	// Only reorder short blocks
 	if sideInfo.WindowsSwitchingFlag[gr][ch] == 1 && sideInfo.BlockType[gr][ch] == blockShort {
@@ -624,12 +594,12 @@ func reorder(gr, ch int, header Header, sideInfo sideInformation, is *[2][2][ibl
 	}
 }
 
-func stereo(gr int, header Header, is *[2][2][iblen]float32) {
-	if header.Mode == modeJoinStereo {
-		if header.ModeExtension&intensityStereo == intensityStereo {
+func stereo(gr int, mode, modeExtension uint8, is *[2][2][iblen]float32) {
+	if mode == modeJoinStereo {
+		if modeExtension&intensityStereo == intensityStereo {
 			// TODO
 		}
-		if header.ModeExtension&msStereo == msStereo {
+		if modeExtension&msStereo == msStereo {
 			for sample := 0; sample < iblen; sample++ {
 				m := is[gr][0][sample] // mid
 				s := is[gr][1][sample] // side
@@ -750,7 +720,7 @@ func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float3
 
 		// Calc 32 samples --------------------------------------------------
 		for i := 0; i < 32; i++ {
-			S := float32(0)
+			var S float32
 			for j := 0; j < 512; j += 32 {
 				S += wVec[j+i]
 			}
@@ -765,6 +735,8 @@ func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float3
 	}
 }
 
-var DecodeMp1 = decodeMpeg1
-var DecodeMp2 = decodeMpeg1
+//var DecodeMp1 = decodeMpeg1
+
+//var DecodeMp2 = decodeMpeg1
+
 var DecodeMp3 = decodeMpeg1

@@ -7,7 +7,7 @@ type BitReader struct {
 }
 
 func NewBitReader(b []byte) *BitReader {
-	return &BitReader{0, b, 0}
+	return &BitReader{bytes: b}
 }
 
 func (bitReader *BitReader) ReadBits(n int) int {
