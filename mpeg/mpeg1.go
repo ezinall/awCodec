@@ -5,6 +5,8 @@ import (
 	"awCodec/pcm"
 	"awCodec/utils"
 	"bytes"
+	"encoding/binary"
+	"fmt"
 	"math"
 )
 
@@ -44,11 +46,16 @@ var bitrateSpecified = [3][16]int{
 		256000, 288000, 320000, 352000, 384000, 416000, 448000, 0}, // Bit/s
 }
 
-var frequencySpecified = [3]int{
-	44100, 48000, 32000, // Hz
+var frequencySpecified = [4]int{
+	44100, 48000, 32000, 0, // Hz (0 - reserved)
 }
 
-const iblen = 576 // Frequency lines of each granule
+var subbands = [4]int{
+	4, 8, 12, 16,
+}
+
+// Frequency lines of each granule
+const iblen = 576
 
 type sideInformation struct {
 	MainDataBegin        uint16         // 9 bits
@@ -70,8 +77,8 @@ type sideInformation struct {
 	Count1tableSelect    [2][2]byte     // granule/channel 1 bit
 }
 
+// sideInformation.BlockType
 const (
-	// sideInformation.BlockType
 	blockReserved = 0b00 // Reserved block
 	blockStart    = 0b01 // Start block
 	blockShort    = 0b10 // 3 short block
@@ -104,9 +111,13 @@ var bandIndex = [3][2][]int{
 }
 
 // If it is set, then the values of the Table 11 are added to the scale factors.
-//Preflag table only for sideInformation.BlockType blockShort windows.
+// Preflag table only for sideInformation.BlockType blockShort windows.
 var pretab = [22]int{
 	0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 2, 0,
+}
+
+func cleanID3(file []byte) []byte {
+	return nil
 }
 
 // Decode MPEG1/MPEG2 format.
@@ -120,67 +131,105 @@ func decodeMpeg1(file []byte) (*pcm.F32LE, error) {
 	var prevData []byte
 	prevSamples := [2][32][18]float32{}
 	vVec := [2][1024]float32{}
+
 	for fileBuf.Len() != 0 {
-		// Header ======================================================================================================
-		buf := fileBuf.Next(4)
-		//fmt.Printf("%08b\n", buf)
-
-		h := int32(buf[0])<<24 | int32(buf[1])<<16 | int32(buf[2])<<8 | int32(buf[3])
-
-		sw := uint16(h >> 20 & 0xFFF)
-		if sw != syncWord {
-			break
+		// Header =====================================================================================================
+		header := binary.BigEndian.Uint32(fileBuf.Next(4))
+		if header>>20&syncWord != syncWord {
+			continue
 		}
 
-		//ID := uint8(h >> 19 & 0x1)
-		layer := uint8(h >> 17 & 0x3)
-		protectionBit := uint8(h >> 16 & 0x1)
-		bitrateIndex := uint8(h >> 12 & 0xF)
-		samplingFrequency := uint8(h >> 10 & 0x3)
-		paddingBit := uint8(h >> 9 & 0x1)
+		id := uint8(header >> 19 & 0x1)
+		if id != mpeg1 {
+			continue
+		}
+		layer := uint8(header >> 17 & 0x3)
+		protectionBit := uint8(header >> 16 & 0x1)
+		bitrateIndex := uint8(header >> 12 & 0xF)
+		samplingFrequency := uint8(header >> 10 & 0x3)
+		paddingBit := uint8(header >> 9 & 0x1)
 		//privateBit := uint8(h >> 8 & 0x1)
-		mode := uint8(h >> 6 & 0x3)
-		modeExtension := uint8(h >> 4 & 0x3)
+		mode := uint8(header >> 6 & 0x3)
+		modeExtension := uint8(header >> 4 & 0x3)
 		//copyright := uint8(h >> 3 & 0x1)
 		//copy := uint8(h >> 2 & 0x1)
 		//emphasis := uint8(h >> 0 & 0x3)
 
-		// Frame length ===============================================================================================
+		// Frame length --------------------------------------------------
 		frameSize := 144 // byte for layer2 and layer3 1152/(1b*8bit) = 144; for layer1 384/(4b*8bit) = 12
+		if layer == layer1 {
+			frameSize = 48 // 384/8bit = 48, why not 12???
+		}
 		bitrate := bitrateSpecified[layer-1][bitrateIndex]
 		sampleRate := frequencySpecified[samplingFrequency]
-		frameLength := frameSize * bitrate / sampleRate
-		if paddingBit == padding {
-			frameLength += 1
+		frameLength := 0
+		if sampleRate != 0 {
+			frameLength = frameSize * bitrate / sampleRate
+			if paddingBit == padding {
+				frameLength += 1
+			}
 		}
-		//fmt.Println(bitrate/1000, sampleRate, frameLength)
+		fmt.Println(bitrate/1000, sampleRate, frameLength)
+		frame := bytes.NewBuffer(fileBuf.Next(frameLength - 4))
 
 		if out.Context().SampleRate == 0 {
 			out.Context().SampleRate = sampleRate
 		}
 
-		// CRC Check ===================================================================================================
+		// Error check ================================================================================================
 		if protectionBit == protected {
-			_ = fileBuf.Next(2) // crc
+			_ = frame.Next(2) // crc
 		}
 
-		// AudioData ===================================================================================================
-		nch := 2 // Number of channels; equals 1 for single_channel mode, equals 2 for other modes.
+		// Audio data =================================================================================================
+		nch := 2 // number of channels, equals 1 for single_channel mode, equals 2 for other modes.
 		if mode == modeSingleChannel {
 			nch = 1
 		}
 
+		// TODO rework to standard
 		if out.Context().Channels == 0 {
 			out.Context().Channels = nch
 		}
 
-		// Side Information ==========================================================================================
+		if layer == layer1 {
+			br := utils.NewBitReader(frame.Bytes())
+
+			bound := 32
+			if mode == modeJoinStereo {
+				bound = subbands[modeExtension]
+			}
+
+			_, samples := decodeLayer1(br, nch, bound)
+			pcm_ := make([]float32, 32*2*12)
+
+			for ch := 0; ch < nch; ch++ {
+				for s := 0; s < 12; s++ {
+					synthSubbandFilter(samples[ch][32*s:], ch, &vVec[ch], pcm_[32*2*s:])
+				}
+			}
+
+			out.Append(pcm_)
+
+		} else if layer == layer2 {
+
+		} else if layer == layer3 {
+
+		}
+
+		// Ancillary data =============================================================================================
+		if layer == layer1 || layer == layer2 {
+			//fmt.Println(float32(br.Counter)/8)
+			continue
+		}
+
+		// Side Information ===========================================================================================
 		sideInformationLength := 32
 		if mode == modeSingleChannel {
 			sideInformationLength = 17
 		}
 
-		sideInfoBitReader := utils.NewBitReader(fileBuf.Next(sideInformationLength))
+		sideInfoBitReader := utils.NewBitReader(frame.Next(sideInformationLength))
 
 		sideInfo := sideInformation{}
 		sideInfo.MainDataBegin = uint16(sideInfoBitReader.ReadBits(9)) // main_data_begin
@@ -254,7 +303,7 @@ func decodeMpeg1(file []byte) (*pcm.F32LE, error) {
 			mainDataLength -= 2
 		}
 
-		mainData := fileBuf.Next(mainDataLength)
+		mainData := frame.Next(mainDataLength)
 
 		if sideInfo.MainDataBegin != 0 {
 			mainData = append(prevData[len(prevData)-int(sideInfo.MainDataBegin):], mainData...)
@@ -404,7 +453,7 @@ func decodeMpeg1(file []byte) (*pcm.F32LE, error) {
 			}
 		}
 
-		// ??? ================================================================================================
+		// Decoding ===================================================================================================
 		samples := make([]float32, iblen*2*2) // iblen * number granules * byte count per sample
 		for gr := 0; gr < 2; gr++ {
 			for ch := 0; ch < nch; ch++ {
@@ -501,7 +550,7 @@ func requantize(gr, ch int, samplingFrequency uint8, sideInfo sideInformation, s
 				}
 			}
 		}
-	} else { // Only long blocks
+	} else { // only long blocks
 		sfb := 0
 		nextSfb := bandIndex[samplingFrequency][0][sfb+1]
 		for i := 0; i < countValues[gr][ch]; i++ {
@@ -687,21 +736,13 @@ func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float3
 	uVec := [512]float32{}
 	wVec := [512]float32{}
 
-	tempVec := [32]float32{}
-
-	for sb := 0; sb < 18; sb++ { // Loop through 18 samples in 32 subband blocks
+	for sb := 0; sb < 18; sb++ { // loop through 18 samples in 32 subband blocks
 		copy(vVec[ch][64:1024], vVec[ch][0:1024-64])
-
-		// Offset --------------------------------------------------
-		for i := 0; i < 32; i++ {
-			tempVec[i] = is[gr][ch][i*18+sb]
-		}
-
 		// Matrix --------------------------------------------------
 		for i := 0; i < 64; i++ {
 			vVec[ch][i] = 0.0
 			for j := 0; j < 32; j++ {
-				vVec[ch][i] += tempVec[j] * synthN[i][j]
+				vVec[ch][i] += is[gr][ch][j*18+sb] * synthN[i][j]
 			}
 		}
 
@@ -735,8 +776,6 @@ func synthFilterbank(gr, ch int, is *[2][2][iblen]float32, vVec *[2][1024]float3
 	}
 }
 
-//var DecodeMp1 = decodeMpeg1
-
-//var DecodeMp2 = decodeMpeg1
-
+var DecodeMp1 = decodeMpeg1
+var DecodeMp2 = decodeMpeg1
 var DecodeMp3 = decodeMpeg1

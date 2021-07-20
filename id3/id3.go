@@ -46,8 +46,8 @@ type id3v2Header struct {
 
 type extHeader struct {
 	HeaderSize int32
-	//Flags      int16
-	//Padding    int32
+	// Flags      int16
+	// Padding    int32
 }
 
 type frameHeader struct {
@@ -56,7 +56,7 @@ type frameHeader struct {
 	Flags   uint16
 }
 
-// Decode tag bytes to string.
+// Decodes tag bytes to string
 func decodeByte(enc byte, b []byte) string {
 	var r []byte
 
@@ -82,6 +82,7 @@ func decodeByte(enc byte, b []byte) string {
 	return string(r)
 }
 
+// Finds length of string with terminate bytes
 func findLenWithTerm(enc byte, b []byte) (l int) {
 	if enc == encodingUTF16WithBOM || enc == encodingUTF16 {
 		l = bytes.Index(b, []byte{0x00, 0x00})
@@ -106,7 +107,7 @@ func ReadID3(file []byte) ([]byte, error) {
 		if err := binary.Read(r, binary.BigEndian, &header); err != nil {
 			return file, err
 		}
-		//fmt.Printf("%+v\n", header)
+		// fmt.Printf("%+v\n", header)
 
 		size := (uint32(header.Size[0]) << 21) | (uint32(header.Size[1]) << 14) |
 			(uint32(header.Size[2]) << 7) | uint32(header.Size[3])
@@ -130,7 +131,7 @@ func ReadID3(file []byte) ([]byte, error) {
 				break
 			}
 
-			//fmt.Printf("%s, %d, %d\n", fh.FrameID, fh.Size, fh.Flags)
+			// fmt.Printf("%s, %d, %d\n", fh.FrameID, fh.Size, fh.Flags)
 
 			frameId := string(fh.FrameID[:])
 
@@ -164,7 +165,7 @@ func ReadID3(file []byte) ([]byte, error) {
 				lang := base.ISO3() // Language
 
 				l := findLenWithTerm(enc, frame.Bytes())
-				desc := decodeByte(enc, frame.Next(l)) // Short content descrip.
+				desc := decodeByte(enc, frame.Next(l)) // Short content description
 
 				val := decodeByte(enc, frame.Next(int(fh.Size)-4-l)) // The actual text
 
@@ -176,7 +177,6 @@ func ReadID3(file []byte) ([]byte, error) {
 				buf := frame.Next(int(fh.Size - 1))
 
 				t := decodeByte(enc, buf)
-
 				fmt.Println(frameId, t)
 
 			} else {
@@ -184,8 +184,7 @@ func ReadID3(file []byte) ([]byte, error) {
 			}
 		}
 
-		// 10 byte header length
-		return file[size+10:], nil
+		return file[size+10:], nil // 10 byte header length
 
 	} else if bytes.Equal(file[len(file)-128:len(file)-125], tag) {
 		frame := bytes.NewBuffer(file[len(file)-128:])
@@ -199,5 +198,6 @@ func ReadID3(file []byte) ([]byte, error) {
 
 		return file[:len(file)-128], nil
 	}
+
 	return file, nil
 }

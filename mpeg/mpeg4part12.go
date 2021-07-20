@@ -557,4 +557,4 @@ func mpeg12(file *bytes.Reader) {
 	}
 }
 
-var Mp4 = mpeg12
+var DecodeMp4 = mpeg12
